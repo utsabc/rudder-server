@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -212,17 +213,12 @@ func (gateway *HandleT) webRequestBatchDBWriter(process int) {
 
 			if enableDedup {
 				allMessageIds = append(allMessageIds, messageIDs...)
-				txn := gateway.badgerDB.NewTransaction(false)
-				defer txn.Discard()
 				var toRemoveMessageIndexes []int
 				for idx, messageID := range messageIDs {
-					_, err := txn.Get([]byte(messageID))
-					if err != badger.ErrKeyNotFound {
+					if gateway.jobsDB.IDExists(messageID) {
 						toRemoveMessageIndexes = append(toRemoveMessageIndexes, idx)
 					}
 				}
-				err = txn.Commit()
-				misc.AssertError(err)
 
 				count := 0
 				for _, idx := range toRemoveMessageIndexes {
@@ -250,7 +246,7 @@ func (gateway *HandleT) webRequestBatchDBWriter(process int) {
 			//Should be function of body
 			newJob := jobsdb.JobT{
 				UUID:         id,
-				Parameters:   []byte(fmt.Sprintf(`{"source_id": "%v"}`, enabledWriteKeysSourceMap[writeKey])),
+				Parameters:   []byte(fmt.Sprintf(`{"source_id": "%v", "message_ids": ["%s"]}`, enabledWriteKeysSourceMap[writeKey], bytes.Join(messageIDs, []byte(`", "`)))),
 				CreatedAt:    time.Now(),
 				ExpireAt:     time.Now(),
 				CustomVal:    CustomVal,
@@ -261,21 +257,7 @@ func (gateway *HandleT) webRequestBatchDBWriter(process int) {
 			jobWriteKeyMap[newJob.UUID] = writeKey
 		}
 
-		errorMessagesMap := gateway.jobsDB.Store(jobList)
-
-		if enableDedup {
-			txn := gateway.badgerDB.NewTransaction(true)
-			for _, messageID := range allMessageIds {
-				e := badger.NewEntry([]byte(messageID), nil).WithTTL(24 * time.Hour)
-				if err := txn.SetEntry(e); err == badger.ErrTxnTooBig {
-					_ = txn.Commit()
-					txn = gateway.badgerDB.NewTransaction(true)
-					_ = txn.SetEntry(e)
-				}
-			}
-			err := txn.Commit()
-			misc.AssertError(err)
-		}
+		errorMessagesMap := gateway.jobsDB.Store(jobList, allMessageIds...)
 
 		misc.Assert(preDbStoreCount+len(errorMessagesMap) == len(breq.batchRequest))
 		for uuid, err := range errorMessagesMap {

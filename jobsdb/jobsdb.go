@@ -26,10 +26,10 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"sort"
 	"unicode/utf8"
 
+	"github.com/AndreasBriese/bbloom"
 	"github.com/rudderlabs/rudder-server/utils/logger"
 
 	"strconv"
@@ -110,6 +110,15 @@ type HandleT struct {
 	jobsFileUploader      filemanager.FileManager
 	jobStatusFileUploader filemanager.FileManager
 	statTableCount        *stats.RudderStats
+	bloomFilters          []dsBloomT
+	bloomFiltersLock      sync.RWMutex
+	dsBufferList          []dataSetT
+}
+
+type dsBloomT struct {
+	Filter      bbloom.Bloom
+	Index       string
+	TablePrefix string
 }
 
 //The struct which is written to the journal
@@ -130,9 +139,9 @@ var dbErrorMap = map[string]string{
 //Some helper functions
 func (jd *HandleT) assertError(err error) {
 	if err != nil {
-		debug.SetTraceback("all")
-		debug.PrintStack()
-		jd.printLists(true)
+		// debug.SetTraceback("all")
+		// debug.PrintStack()
+		// jd.printLists(true)
 		logger.Fatal(jd.dsEmptyResultCache)
 		defer bugsnag.AutoNotify(err)
 		panic(err)
@@ -141,9 +150,9 @@ func (jd *HandleT) assertError(err error) {
 
 func (jd *HandleT) assert(cond bool) {
 	if !cond {
-		debug.SetTraceback("all")
-		debug.PrintStack()
-		jd.printLists(true)
+		// debug.SetTraceback("all")
+		// debug.PrintStack()
+		// jd.printLists(true)
 		logger.Fatal(jd.dsEmptyResultCache)
 		defer bugsnag.AutoNotify("Assertion failed")
 		panic("Assertion failed")
@@ -299,6 +308,7 @@ func (jd *HandleT) Setup(clearAll bool, tablePrefix string, retentionPeriod time
 		jd.assertError(err)
 		go jd.backupDSLoop()
 	}
+	go jd.dedupDSLoop()
 	go jd.mainCheckLoop()
 }
 
@@ -653,6 +663,18 @@ func (jd *HandleT) addNewDS(appendLast bool, insertBeforeDS dataSetT) dataSetT {
 	_, err = jd.dbHandle.Exec(sqlStatement)
 	jd.assertError(err)
 
+	bf := bbloom.New(float64(1<<20), float64(0.01))
+	// if appendLast && len(jd.bloomFilters) > 0 {
+	// 	oldFilter := jd.bloomFilters[len(jd.bloomFilters)-1].Filter
+	// 	oldFilter.Mtx.Lock()
+	// 	oldFilterJSON := oldFilter.JSONMarshal()
+	// 	oldFilter.Mtx.Unlock()
+	// 	persist oldoldFilterJSON
+	// }
+	jd.bloomFiltersLock.Lock()
+	jd.bloomFilters = append(jd.bloomFilters, dsBloomT{Filter: bf, Index: newDSIdx})
+	jd.bloomFiltersLock.Unlock()
+
 	if appendLast {
 		//Refresh the in-memory list. We only need to refresh the
 		//last DS, not the entire but we do it anyway.
@@ -706,10 +728,15 @@ func (jd *HandleT) dropDS(ds dataSetT, allowMissing bool) {
 }
 
 //Rename a dataset
-func (jd *HandleT) renameDS(ds dataSetT, allowMissing bool) {
+func (jd *HandleT) renameDS(ds dataSetT, prefix string, removePrefix string, allowMissing bool) {
 	var sqlStatement string
-	var renamedJobStatusTable = fmt.Sprintf(`pre_drop_%s`, ds.JobStatusTable)
-	var renamedJobTable = fmt.Sprintf(`pre_drop_%s`, ds.JobTable)
+	if len(removePrefix) > 0 {
+		removePrefix += "_"
+	}
+	jobTable := strings.TrimPrefix(ds.JobTable, removePrefix)
+	jobStatusTable := strings.TrimPrefix(ds.JobStatusTable, removePrefix)
+	var renamedJobStatusTable = fmt.Sprintf(`%s_%s`, prefix, jobStatusTable)
+	var renamedJobTable = fmt.Sprintf(`%s_%s`, prefix, jobTable)
 
 	if allowMissing {
 		sqlStatement = fmt.Sprintf(`ALTER TABLE IF EXISTS %s RENAME TO %s`, ds.JobStatusTable, renamedJobStatusTable)
@@ -843,11 +870,20 @@ func (jd *HandleT) postMigrateHandleDS(migrateFrom []dataSetT) error {
 
 	//Rename datasets before dropping them, so that they can be uploaded to s3
 	for _, ds := range migrateFrom {
-		if jd.toBackup {
-			jd.renameDS(ds, false)
-		} else {
-			jd.dropDS(ds, false)
+		for index := len(jd.bloomFilters) - 1; index >= 0; index-- {
+			if jd.bloomFilters[index].Index == ds.Index {
+				jd.bloomFiltersLock.Lock()
+				jd.bloomFilters[index].TablePrefix = "temp"
+				jd.bloomFiltersLock.Unlock()
+				break
+			}
 		}
+		jd.renameDS(ds, "temp", "", false)
+		// if jd.toBackup {
+		// 	jd.renameDS(ds, "pre_drop", false)
+		// } else {
+		// 	jd.dropDS(ds, false)
+		// }
 	}
 
 	//Refresh the in-memory lists
@@ -912,7 +948,6 @@ func (jd *HandleT) storeJobsDS(ds dataSetT, copyID bool, retryEach bool, jobList
 
 	//Empty customValFilters means we want to clear for all
 	jd.markClearEmptyResult(ds, []string{}, []string{}, []string{}, false)
-	// fmt.Println("Bursting CACHE")
 
 	return
 }
@@ -1384,11 +1419,34 @@ func (jd *HandleT) mainCheckLoop() {
 	}
 }
 
+func (jd *HandleT) dedupDSLoop() {
+	for {
+		time.Sleep(backupCheckSleepDuration)
+		logger.Info("DedupDS check:Start")
+		ds, total := jd.getDSWithPrefix("temp")
+		if total > 10 {
+			jd.bloomFiltersLock.Lock()
+			for index := len(jd.bloomFilters) - 1; index >= 0; index-- {
+				if jd.bloomFilters[index].Index == ds.Index {
+					jd.bloomFilters = append(jd.bloomFilters[:index], jd.bloomFilters[index+1:]...)
+					break
+				}
+			}
+			jd.bloomFiltersLock.Unlock()
+			if jd.toBackup {
+				jd.renameDS(ds, "pre_drop", "temp", false)
+			} else {
+				jd.dropDS(ds, false)
+			}
+		}
+	}
+}
+
 func (jd *HandleT) backupDSLoop() {
 	for {
 		time.Sleep(backupCheckSleepDuration)
 		logger.Info("BackupDS check:Start")
-		backupDS := jd.getBackupDS()
+		backupDS, _ := jd.getDSWithPrefix("pre_drop")
 		// check if non empty dataset is present to backup
 		// else continue
 		if (dataSetT{} == backupDS) {
@@ -1506,7 +1564,7 @@ func (jd *HandleT) backupTable(tableName string, startTime int64) (success bool,
 	return true, err
 }
 
-func (jd *HandleT) getBackupDS() dataSetT {
+func (jd *HandleT) getDSWithPrefix(prefix string) (dataSetT, int) {
 	var backupDS dataSetT
 
 	//Read the table names from PG
@@ -1515,24 +1573,24 @@ func (jd *HandleT) getBackupDS() dataSetT {
 	//We check for job_status because that is renamed after job
 	dnumList := []string{}
 	for _, t := range tableNames {
-		if strings.HasPrefix(t, "pre_drop_"+jd.tablePrefix+"_jobs_") {
-			dnum := t[len("pre_drop_"+jd.tablePrefix+"_jobs_"):]
+		if strings.HasPrefix(t, prefix+"_"+jd.tablePrefix+"_jobs_") {
+			dnum := t[len(prefix+"_"+jd.tablePrefix+"_jobs_"):]
 			dnumList = append(dnumList, dnum)
 			continue
 		}
 	}
 	if len(dnumList) == 0 {
-		return backupDS
+		return backupDS, 0
 	}
 
 	jd.sortDnumList(dnumList)
 
 	backupDS = dataSetT{
-		JobTable:       fmt.Sprintf("pre_drop_%s_jobs_%s", jd.tablePrefix, dnumList[0]),
-		JobStatusTable: fmt.Sprintf("pre_drop_%s_job_status_%s", jd.tablePrefix, dnumList[0]),
+		JobTable:       fmt.Sprintf("%s_%s_jobs_%s", prefix, jd.tablePrefix, dnumList[0]),
+		JobStatusTable: fmt.Sprintf("%s_%s_job_status_%s", prefix, jd.tablePrefix, dnumList[0]),
 		Index:          dnumList[0],
 	}
-	return backupDS
+	return backupDS, len(dnumList)
 }
 
 /*
@@ -1703,7 +1761,7 @@ func (jd *HandleT) recoverFromCrash(goRoutineType string) {
 		migrateSrc := opPayloadJSON.From
 		for _, ds := range migrateSrc {
 			if jd.toBackup {
-				jd.renameDS(ds, true)
+				jd.renameDS(ds, "pre_drop", "", true)
 			} else {
 				jd.dropDS(ds, true)
 			}
@@ -1817,14 +1875,47 @@ func (jd *HandleT) UpdateJobStatus(statusList []*JobStatusT, customValFilters []
 /*
 Store call is used to create new Jobs
 */
-func (jd *HandleT) Store(jobList []*JobT) map[uuid.UUID]string {
+func (jd *HandleT) Store(jobList []*JobT, ids ...[]byte) map[uuid.UUID]string {
 
 	//Only locks the list
 	jd.dsListLock.RLock()
 	defer jd.dsListLock.RUnlock()
 
 	dsList := jd.getDSList(false)
-	return jd.storeJobsDS(dsList[len(dsList)-1], false, true, jobList)
+	errorMessagesMap := jd.storeJobsDS(dsList[len(dsList)-1], false, true, jobList)
+	if len(ids) > 0 {
+		for _, id := range ids {
+			jd.bloomFilters[len(jd.bloomFilters)-1].Filter.Add(id)
+		}
+	}
+	return errorMessagesMap
+}
+
+func (jd *HandleT) IDExists(id []byte) bool {
+	jd.bloomFiltersLock.RLock()
+	defer jd.bloomFiltersLock.RUnlock()
+	for index := len(jd.bloomFilters) - 1; index >= 0; index-- {
+		bf := jd.bloomFilters[index]
+		isIn := bf.Filter.Has(id)
+		if !isIn {
+			continue
+		} else {
+			// check in db and return
+			var prefix string
+			if bf.TablePrefix != "" {
+				prefix = bf.TablePrefix + "_"
+			}
+			stmt := fmt.Sprintf(`SELECT job_id FROM %s WHERE "parameters"->'message_ids' ? '%s'`, fmt.Sprintf("%s%s_jobs_%s", prefix, jd.tablePrefix, bf.Index), string(id))
+			var jobID string
+			err := jd.dbHandle.QueryRow(stmt).Scan(&jobID)
+			if err != nil {
+				continue
+			} else {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 /*

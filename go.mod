@@ -3,6 +3,7 @@ module github.com/rudderlabs/rudder-server
 go 1.12
 
 require (
+	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96
 	github.com/BurntSushi/toml v0.3.1
 	github.com/araddon/dateparse v0.0.0-20190622164848-0fb0a474d195
 	github.com/aws/aws-sdk-go v1.21.7
