@@ -672,7 +672,7 @@ func (jd *HandleT) addNewDS(appendLast bool, insertBeforeDS dataSetT) dataSetT {
 	// 	persist oldoldFilterJSON
 	// }
 	jd.bloomFiltersLock.Lock()
-	jd.bloomFilters = append(jd.bloomFilters, dsBloomT{Filter: bf, Index: newDSIdx})
+	jd.bloomFilters = append(jd.bloomFilters, dsBloomT{Filter: bf, Index: newDSIdx, TablePrefix: jd.tablePrefix})
 	jd.bloomFiltersLock.Unlock()
 
 	if appendLast {
@@ -874,11 +874,11 @@ func (jd *HandleT) postMigrateHandleDS(migrateFrom []dataSetT) error {
 			if jd.bloomFilters[index].Index == ds.Index {
 				jd.bloomFiltersLock.Lock()
 				jd.bloomFilters[index].TablePrefix = "temp"
+				jd.renameDS(ds, "temp", "", false)
 				jd.bloomFiltersLock.Unlock()
 				break
 			}
 		}
-		jd.renameDS(ds, "temp", "", false)
 		// if jd.toBackup {
 		// 	jd.renameDS(ds, "pre_drop", false)
 		// } else {
