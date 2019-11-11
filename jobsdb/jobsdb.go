@@ -1886,9 +1886,11 @@ func (jd *HandleT) Store(jobList []*JobT, ids ...[]byte) map[uuid.UUID]string {
 	dsList := jd.getDSList(false)
 	errorMessagesMap := jd.storeJobsDS(dsList[len(dsList)-1], false, true, jobList)
 	if len(ids) > 0 {
+		jd.bloomFiltersLock.Lock()
 		for _, id := range ids {
 			jd.bloomFilters[len(jd.bloomFilters)-1].Filter.Add(id)
 		}
+		jd.bloomFiltersLock.Unlock()
 	}
 	return errorMessagesMap
 }
