@@ -451,20 +451,6 @@ func backendConfigSubscriber() {
 
 //Setup initializes this module
 func (gateway *HandleT) Setup(jobsDB *jobsdb.HandleT, clearDB *bool) {
-	if enableDedup {
-		var err error
-		gateway.badgerDB, err = badger.Open(badger.DefaultOptions("/tmp/badger"))
-		if err != nil {
-			misc.AssertError(err)
-		}
-		defer gateway.badgerDB.Close()
-		if *clearDB {
-			err = gateway.badgerDB.DropAll()
-			misc.AssertError(err)
-		}
-		go gateway.gcBadgerDB()
-	}
-
 	gateway.webRequestQ = make(chan *webRequestT)
 	gateway.batchRequestQ = make(chan *batchWebRequestT)
 	gateway.jobsDB = jobsDB

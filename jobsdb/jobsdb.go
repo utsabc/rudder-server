@@ -113,7 +113,6 @@ type HandleT struct {
 	bloomFilters          []dsBloomT
 	bloomFiltersLock      sync.RWMutex
 	dsBufferList          []dataSetT
-	writeKeyDupStats      map[string]int
 }
 
 type dsBloomT struct {
@@ -261,7 +260,6 @@ func (jd *HandleT) Setup(clearAll bool, tablePrefix string, retentionPeriod time
 	jd.dsRetentionPeriod = retentionPeriod
 	jd.toBackup = toBackup
 	jd.dsEmptyResultCache = map[dataSetT]map[string]map[string]map[string]bool{}
-	jd.writeKeyDupStats = make(map[string]int)
 
 	jd.dbHandle, err = sql.Open("postgres", psqlInfo)
 	jd.assertError(err)
@@ -280,6 +278,7 @@ func (jd *HandleT) Setup(clearAll bool, tablePrefix string, retentionPeriod time
 		jd.dropAllDS()
 		jd.delJournal()
 		jd.dropAllBackupDS()
+		jd.dropAllTempDS()
 	}
 
 	jd.setupEnumTypes()
@@ -766,7 +765,7 @@ func (jd *HandleT) terminateQueries() {
 	jd.assertError(err)
 }
 
-func (jd *HandleT) getBackupDSList() []dataSetT {
+func (jd *HandleT) getTableList(prefix string) []dataSetT {
 	//Read the table names from PG
 	tableNames := jd.getAllTableNames()
 
@@ -776,7 +775,7 @@ func (jd *HandleT) getBackupDSList() []dataSetT {
 
 	var dsList []dataSetT
 
-	tablePrefix := "pre_drop_" + jd.tablePrefix
+	tablePrefix := prefix + "_" + jd.tablePrefix
 	for _, t := range tableNames {
 		if strings.HasPrefix(t, tablePrefix+"_jobs_") {
 			dnum := t[len(tablePrefix+"_jobs_"):]
@@ -802,7 +801,15 @@ func (jd *HandleT) getBackupDSList() []dataSetT {
 }
 
 func (jd *HandleT) dropAllBackupDS() error {
-	dsList := jd.getBackupDSList()
+	dsList := jd.getTableList("pre_drop")
+	for _, ds := range dsList {
+		jd.dropDS(ds, false)
+	}
+	return nil
+}
+
+func (jd *HandleT) dropAllTempDS() error {
+	dsList := jd.getTableList("temp")
 	for _, ds := range dsList {
 		jd.dropDS(ds, false)
 	}
@@ -1895,13 +1902,6 @@ func (jd *HandleT) Store(jobList []*JobT, ids ...[]byte) map[uuid.UUID]string {
 	return errorMessagesMap
 }
 
-func updateWriteKeyDupMissStats(writeKeyStats map[string]int) {
-	for writeKey, count := range writeKeyStats {
-		writeKeyStatsD := stats.NewWriteKeyStat("gateway.write_key_duplicate_messages_bloom_miss", stats.CountType, writeKey)
-		writeKeyStatsD.Count(count)
-	}
-}
-
 func (jd *HandleT) IDExists(id []byte, writeKey string) bool {
 	jd.bloomFiltersLock.RLock()
 	defer jd.bloomFiltersLock.RUnlock()
@@ -1912,8 +1912,8 @@ func (jd *HandleT) IDExists(id []byte, writeKey string) bool {
 			continue
 		} else {
 			// check in db and return
-			misc.IncrementMapByKey(jd.writeKeyDupStats, writeKey)
-			updateWriteKeyDupMissStats(jd.writeKeyDupStats)
+			writeKeyStatsD := stats.NewWriteKeyStat("gateway.write_key_duplicate_messages_bloom_miss", stats.CountType, writeKey)
+			writeKeyStatsD.Count(1)
 			var prefix string
 			if bf.TablePrefix != "" {
 				prefix = bf.TablePrefix + "_"

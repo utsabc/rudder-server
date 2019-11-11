@@ -143,7 +143,7 @@ func main() {
 	degradedMode := flag.Bool("degraded-mode", false, "a bool")
 	maintenanceMode := flag.Bool("maintenance-mode", false, "a bool")
 
-	clearDB := flag.Bool("cleardb", false, "a bool")
+	clearDB := flag.Bool("cleardb", true, "a bool")
 	cpuprofile := flag.String("cpuprofile", fmt.Sprintf("cpuprof_%v", time.Now().Unix()), "write cpu profile to `file`")
 	memprofile := flag.String("memprofile", fmt.Sprintf("memprof_%v", time.Now().Unix()), "write memory profile to `file`")
 
