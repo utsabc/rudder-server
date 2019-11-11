@@ -113,6 +113,7 @@ type HandleT struct {
 	bloomFilters          []dsBloomT
 	bloomFiltersLock      sync.RWMutex
 	dsBufferList          []dataSetT
+	writeKeyDupStats      map[string]int
 }
 
 type dsBloomT struct {
@@ -260,6 +261,7 @@ func (jd *HandleT) Setup(clearAll bool, tablePrefix string, retentionPeriod time
 	jd.dsRetentionPeriod = retentionPeriod
 	jd.toBackup = toBackup
 	jd.dsEmptyResultCache = map[dataSetT]map[string]map[string]map[string]bool{}
+	jd.writeKeyDupStats = make(map[string]int)
 
 	jd.dbHandle, err = sql.Open("postgres", psqlInfo)
 	jd.assertError(err)
@@ -1891,7 +1893,14 @@ func (jd *HandleT) Store(jobList []*JobT, ids ...[]byte) map[uuid.UUID]string {
 	return errorMessagesMap
 }
 
-func (jd *HandleT) IDExists(id []byte) bool {
+func updateWriteKeyDupMissStats(writeKeyStats map[string]int) {
+	for writeKey, count := range writeKeyStats {
+		writeKeyStatsD := stats.NewWriteKeyStat("gateway.write_key_duplicate_messages_bloom_miss", stats.CountType, writeKey)
+		writeKeyStatsD.Count(count)
+	}
+}
+
+func (jd *HandleT) IDExists(id []byte, writeKey string) bool {
 	jd.bloomFiltersLock.RLock()
 	defer jd.bloomFiltersLock.RUnlock()
 	for index := len(jd.bloomFilters) - 1; index >= 0; index-- {
@@ -1901,6 +1910,8 @@ func (jd *HandleT) IDExists(id []byte) bool {
 			continue
 		} else {
 			// check in db and return
+			misc.IncrementMapByKey(jd.writeKeyDupStats, writeKey)
+			updateWriteKeyDupMissStats(jd.writeKeyDupStats)
 			var prefix string
 			if bf.TablePrefix != "" {
 				prefix = bf.TablePrefix + "_"

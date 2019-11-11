@@ -215,7 +215,7 @@ func (gateway *HandleT) webRequestBatchDBWriter(process int) {
 				allMessageIds = append(allMessageIds, messageIDs...)
 				var toRemoveMessageIndexes []int
 				for idx, messageID := range messageIDs {
-					if gateway.jobsDB.IDExists(messageID) {
+					if gateway.jobsDB.IDExists(messageID, writeKey) {
 						toRemoveMessageIndexes = append(toRemoveMessageIndexes, idx)
 					}
 				}
