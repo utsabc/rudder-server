@@ -146,7 +146,7 @@ func (proc *HandleT) Setup(gatewayDB *jobsdb.HandleT, routerDB *jobsdb.HandleT, 
 
 	proc.statListSort = stats.NewStat("processor.job_list_sort", stats.TimerType)
 	proc.marshalSingularEvents = stats.NewStat("processor.marshal_singular_events", stats.TimerType)
-	proc.processorJobList = stats.NewStat("processor.marshal_singular_events", stats.CountType)
+	proc.processorJobList = stats.NewStat("processor.job_list", stats.CountType)
 	proc.marshalSingleEvent = stats.NewStat("processor.marshal_single_event", stats.TimerType)
 	proc.destProcessing = stats.NewStat("processor.dest_processing", stats.TimerType)
 	proc.destStats = make(map[string]*DestStatT)
