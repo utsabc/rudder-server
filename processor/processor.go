@@ -49,6 +49,7 @@ type HandleT struct {
 	statListSort          *stats.RudderStats
 	marshalSingularEvents *stats.RudderStats
 	processorJobList      *stats.RudderStats
+	marshalSingleJob      *stats.RudderStats
 	marshalSingleEvent    *stats.RudderStats
 	destProcessing        *stats.RudderStats
 	statNumDests          *stats.RudderStats
@@ -147,6 +148,7 @@ func (proc *HandleT) Setup(gatewayDB *jobsdb.HandleT, routerDB *jobsdb.HandleT, 
 	proc.statListSort = stats.NewStat("processor.job_list_sort", stats.TimerType)
 	proc.marshalSingularEvents = stats.NewStat("processor.marshal_singular_events", stats.TimerType)
 	proc.processorJobList = stats.NewStat("processor.job_list", stats.CountType)
+	proc.marshalSingleJob = stats.NewStat("processor.marshal_single_job", stats.TimerType)
 	proc.marshalSingleEvent = stats.NewStat("processor.marshal_single_event", stats.TimerType)
 	proc.destProcessing = stats.NewStat("processor.dest_processing", stats.TimerType)
 	proc.destStats = make(map[string]*DestStatT)
@@ -615,10 +617,11 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 		writeKey := gjson.Get(string(batchEvent.EventPayload), "writeKey").Str
 		requestIP := gjson.Get(string(batchEvent.EventPayload), "requestIP").Str
 		receivedAt := gjson.Get(string(batchEvent.EventPayload), "receivedAt").Time()
-		proc.marshalSingleEvent.Start()
+		proc.marshalSingleJob.Start()
 		if ok {
 			//Iterate through all the events in the batch
 			for _, singularEvent := range eventList {
+				proc.marshalSingleEvent.Start()
 				//We count this as one, not destination specific ones
 				totalEvents++
 				//Getting all the destinations which are enabled for this
@@ -665,9 +668,10 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 							shallowEventCopy)
 					}
 				}
+				proc.marshalSingleEvent.stop()
 			}
 		}
-		proc.marshalSingleEvent.End()
+		proc.marshalSingleJob.End()
 
 		//Mark the batch event as processed
 		newStatus := jobsdb.JobStatusT{
