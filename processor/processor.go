@@ -48,6 +48,8 @@ type HandleT struct {
 	statDestTransform     *stats.RudderStats
 	statListSort          *stats.RudderStats
 	marshalSingularEvents *stats.RudderStats
+	processorJobList      *stats.RudderStats
+	marshalSingleEvent    *stats.RudderStats
 	destProcessing        *stats.RudderStats
 	statNumDests          *stats.RudderStats
 	destStats             map[string]*DestStatT
@@ -144,6 +146,8 @@ func (proc *HandleT) Setup(gatewayDB *jobsdb.HandleT, routerDB *jobsdb.HandleT, 
 
 	proc.statListSort = stats.NewStat("processor.job_list_sort", stats.TimerType)
 	proc.marshalSingularEvents = stats.NewStat("processor.marshal_singular_events", stats.TimerType)
+	proc.processorJobList = stats.NewStat("processor.marshal_singular_events", stats.CountType)
+	proc.marshalSingleEvent = stats.NewStat("processor.marshal_single_event", stats.TimerType)
 	proc.destProcessing = stats.NewStat("processor.dest_processing", stats.TimerType)
 	proc.destStats = make(map[string]*DestStatT)
 
@@ -597,6 +601,7 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 	totalEvents := 0
 
 	proc.marshalSingularEvents.Start()
+	proc.processorJobList.Count(len(jobList))
 	for idx, batchEvent := range jobList {
 
 		var eventList []interface{}
@@ -610,7 +615,7 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 		writeKey := gjson.Get(string(batchEvent.EventPayload), "writeKey").Str
 		requestIP := gjson.Get(string(batchEvent.EventPayload), "requestIP").Str
 		receivedAt := gjson.Get(string(batchEvent.EventPayload), "receivedAt").Time()
-
+		proc.marshalSingleEvent.Start()
 		if ok {
 			//Iterate through all the events in the batch
 			for _, singularEvent := range eventList {
@@ -662,6 +667,7 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 				}
 			}
 		}
+		proc.marshalSingleEvent.End()
 
 		//Mark the batch event as processed
 		newStatus := jobsdb.JobStatusT{
