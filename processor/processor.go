@@ -603,9 +603,11 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 	totalEvents := 0
 
 	proc.marshalSingularEvents.Start()
+	jobsTime := time.Now()
 	proc.processorJobList.Count(len(jobList))
 	for idx, batchEvent := range jobList {
-
+		proc.marshalSingleJob.Start()
+		jobStart := time.Now()
 		var eventList []interface{}
 		var ok bool
 		if parsedEventList == nil {
@@ -617,11 +619,12 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 		writeKey := gjson.Get(string(batchEvent.EventPayload), "writeKey").Str
 		requestIP := gjson.Get(string(batchEvent.EventPayload), "requestIP").Str
 		receivedAt := gjson.Get(string(batchEvent.EventPayload), "receivedAt").Time()
-		proc.marshalSingleJob.Start()
+
 		if ok {
 			//Iterate through all the events in the batch
 			for _, singularEvent := range eventList {
 				proc.marshalSingleEvent.Start()
+				eventStart := time.Now()
 				//We count this as one, not destination specific ones
 				totalEvents++
 				//Getting all the destinations which are enabled for this
@@ -668,10 +671,10 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 							shallowEventCopy)
 					}
 				}
-				proc.marshalSingleEvent.stop()
+				//proc.marshalSingleEvent.End()
+				fmt.Println("INFO:  single_event_time", time.Now().Sub(eventStart))
 			}
 		}
-		proc.marshalSingleJob.End()
 
 		//Mark the batch event as processed
 		newStatus := jobsdb.JobStatusT{
@@ -684,9 +687,12 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 			ErrorResponse: []byte(`{"success":"OK"}`),
 		}
 		statusList = append(statusList, &newStatus)
+		fmt.Println("INFO:  job_event_time", time.Now().Sub(jobStart))
+		proc.marshalSingleJob.End()
 	}
 
 	proc.marshalSingularEvents.End()
+	fmt.Println("INFO:  JOBS_event_time", time.Now().Sub(jobsTime))
 
 	//Now do the actual transformation. We call it in batches, once
 	//for each destination ID
