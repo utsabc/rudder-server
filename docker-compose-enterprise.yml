@@ -31,6 +31,13 @@ services:
       dockerfile: Dockerfile
     ports:
       - "9090:9090"
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+    env_file:
+      - build/docker.env
+    command: server /data
   grafana:
     build:
       context: ../rudder-ops
@@ -50,4 +57,4 @@ services:
       - grafana
       - db
       - d-transformer
-    command: db:5432 grafana:3003 grafana:8086 grafana:8888 d-transformer:9090
+    command: db:5432 grafana:3003 grafana:8086 grafana:8888 d-transformer:9090 minio:9000

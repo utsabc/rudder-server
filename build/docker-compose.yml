@@ -32,3 +32,10 @@ services:
       - "9090:9090"
     env_file:
       - docker.env
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+    env_file:
+      - build/docker.env
+    command: server /data
