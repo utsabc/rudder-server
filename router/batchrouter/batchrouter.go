@@ -19,6 +19,7 @@ import (
 	"github.com/rudderlabs/rudder-server/rruntime"
 	"github.com/rudderlabs/rudder-server/services/filemanager"
 	"github.com/rudderlabs/rudder-server/services/stats"
+	"github.com/rudderlabs/rudder-server/services/streammanager"
 	"github.com/rudderlabs/rudder-server/utils"
 	"github.com/rudderlabs/rudder-server/utils/logger"
 	"github.com/rudderlabs/rudder-server/utils/misc"
@@ -34,6 +35,7 @@ var (
 	uploadFreqInS              int64
 	configSubscriberLock       sync.RWMutex
 	objectStorageDestinations  []string
+	objectStreamDestinations   []string
 	warehouseDestinations      []string
 	inProgressMap              map[string]bool
 	inProgressMapLock          sync.RWMutex
@@ -102,12 +104,26 @@ func updateDestStatusStats(id string, count int, isSuccess bool) {
 	destStatsD.Count(count)
 }
 
-func (brt *HandleT) copyJobsToStorage(provider string, batchJobs BatchJobsT, makeJournalEntry bool, isWarehouse bool) StorageUploadOutput {
+func (brt *HandleT) copyJobsToStorage(provider string, batchJobs BatchJobsT, makeJournalEntry bool, destinationType string) StorageUploadOutput {
+
+	var isWarehouse, isStorageDestination, isStreamDestination bool
+
+	switch destinationType {
+	case "warehouse":
+		isWarehouse = true
+	case "stream":
+		isStreamDestination = true
+	default:
+		isStorageDestination = true
+	}
+
 	var localTmpDirName string
 	if isWarehouse {
 		localTmpDirName = "/rudder-warehouse-staging-uploads/"
-	} else {
+	} else if isStorageDestination {
 		localTmpDirName = "/rudder-raw-data-destination-logs/"
+	} else if isStreamDestination {
+		localTmpDirName = "/rudder-stream-data-destination-logs/"
 	}
 
 	uuid := uuid.NewV4()
@@ -154,14 +170,6 @@ func (brt *HandleT) copyJobsToStorage(provider string, batchJobs BatchJobsT, mak
 
 	logger.Debugf("BRT: Logged to local file: %v", gzipFilePath)
 
-	uploader, err := filemanager.New(&filemanager.SettingsT{
-		Provider: provider,
-		Config:   batchJobs.BatchDestination.Destination.Config.(map[string]interface{}),
-	})
-	if err != nil {
-		panic(err)
-	}
-
 	outputFile, err := os.Open(gzipFilePath)
 	if err != nil {
 		panic(err)
@@ -172,7 +180,7 @@ func (brt *HandleT) copyJobsToStorage(provider string, batchJobs BatchJobsT, mak
 	var keyPrefixes []string
 	if isWarehouse {
 		keyPrefixes = []string{config.GetEnv("WAREHOUSE_STAGING_BUCKET_FOLDER_NAME", "rudder-warehouse-staging-logs"), batchJobs.BatchDestination.Source.ID, time.Now().Format("01-02-2006")}
-	} else {
+	} else if isStorageDestination {
 		keyPrefixes = []string{config.GetEnv("DESTINATION_BUCKET_FOLDER_NAME", "rudder-logs"), batchJobs.BatchDestination.Source.ID, time.Now().Format("01-02-2006")}
 	}
 
@@ -181,7 +189,7 @@ func (brt *HandleT) copyJobsToStorage(provider string, batchJobs BatchJobsT, mak
 		opID      int64
 		opPayload json.RawMessage
 	)
-	if !isWarehouse {
+	if isStorageDestination {
 		opPayload, _ = json.Marshal(&ObjectStorageT{
 			Config:          batchJobs.BatchDestination.Destination.Config.(map[string]interface{}),
 			Key:             strings.Join(append(keyPrefixes, fileName), "/"),
@@ -192,7 +200,26 @@ func (brt *HandleT) copyJobsToStorage(provider string, batchJobs BatchJobsT, mak
 		opID = brt.jobsDB.JournalMarkStart(jobsdb.RawDataDestUploadOperation, opPayload)
 		defer brt.jobsDB.JournalDeleteEntry(opID)
 	}
-	_, err = uploader.Upload(outputFile, keyPrefixes...)
+
+	if isStreamDestination {
+		producer, err := streammanager.New(&streammanager.SettingsT{
+			Provider: provider,
+			Config:   batchJobs.BatchDestination.Destination.Config.(map[string]interface{}),
+		})
+		if err != nil {
+			panic(err)
+		}
+		_, err = producer.Produce(outputFile)
+	} else {
+		uploader, err := filemanager.New(&filemanager.SettingsT{
+			Provider: provider,
+			Config:   batchJobs.BatchDestination.Destination.Config.(map[string]interface{}),
+		})
+		if err != nil {
+			panic(err)
+		}
+		_, err = uploader.Upload(outputFile, keyPrefixes...)
+	}
 
 	if err != nil {
 		logger.Errorf("BRT: Error uploading to %s: Error: %v", provider, err)
@@ -309,7 +336,15 @@ func (brt *HandleT) initWorkers() {
 						case misc.ContainsString(objectStorageDestinations, brt.destType):
 							destUploadStat := stats.NewStat(fmt.Sprintf(`batch_router.%s_dest_upload_time`, brt.destType), stats.TimerType)
 							destUploadStat.Start()
-							output := brt.copyJobsToStorage(brt.destType, batchJobs, true, false)
+							output := brt.copyJobsToStorage(brt.destType, batchJobs, true, "storage")
+							brt.setJobStatus(batchJobs, false, output.Error)
+							misc.RemoveFilePaths(output.LocalFilePaths...)
+							destUploadStat.End()
+							setDestInProgress(batchJobs.BatchDestination, false)
+						case misc.ContainsString(objectStreamDestinations, brt.destType):
+							destUploadStat := stats.NewStat(fmt.Sprintf(`batch_router.%s_dest_upload_time`, brt.destType), stats.TimerType)
+							destUploadStat.Start()
+							output := brt.copyJobsToStorage(brt.destType, batchJobs, true, "stream")
 							brt.setJobStatus(batchJobs, false, output.Error)
 							misc.RemoveFilePaths(output.LocalFilePaths...)
 							destUploadStat.End()
@@ -317,7 +352,7 @@ func (brt *HandleT) initWorkers() {
 						case misc.ContainsString(warehouseDestinations, brt.destType):
 							destUploadStat := stats.NewStat(fmt.Sprintf(`batch_router.%s_%s_dest_upload_time`, brt.destType, warehouseutils.ObjectStorageMap[brt.destType]), stats.TimerType)
 							destUploadStat.Start()
-							output := brt.copyJobsToStorage(warehouseutils.ObjectStorageMap[brt.destType], batchJobs, true, true)
+							output := brt.copyJobsToStorage(warehouseutils.ObjectStorageMap[brt.destType], batchJobs, true, "warehouse")
 							if output.Error == nil && output.Key != "" {
 								brt.updateWarehouseMetadata(batchJobs, output.Key)
 								warehouseutils.DestStat(stats.CountType, "generate_staging_files", batchJobs.BatchDestination.Destination.ID).Count(1)
@@ -617,6 +652,7 @@ func loadConfig() {
 	uploadFreqInS = config.GetInt64("BatchRouter.uploadFreqInS", 30)
 	warehouseStagingFilesTable = config.GetString("Warehouse.stagingFilesTable", "wh_staging_files")
 	objectStorageDestinations = []string{"S3", "GCS", "AZURE_BLOB", "MINIO"}
+	objectStreamDestinations = []string{"KAFKA"}
 	warehouseDestinations = []string{"RS", "BQ", "SNOWFLAKE"}
 	inProgressMap = map[string]bool{}
 	lastExecMap = map[string]int64{}

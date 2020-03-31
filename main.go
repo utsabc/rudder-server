@@ -43,6 +43,7 @@ var (
 	enabledDestinations                         []backendconfig.DestinationT
 	configSubscriberLock                        sync.RWMutex
 	objectStorageDestinations                   []string
+	objectStreamDestinations                    []string
 	warehouseDestinations                       []string
 )
 
@@ -58,6 +59,7 @@ func loadConfig() {
 	enableBackup = config.GetBool("JobsDB.enableBackup", true)
 	isReplayServer = config.GetEnvAsBool("IS_REPLAY_SERVER", false)
 	objectStorageDestinations = []string{"S3", "GCS", "AZURE_BLOB", "MINIO"}
+	objectStreamDestinations = []string{"KAFKA"}
 	warehouseDestinations = []string{"RS", "BQ", "SNOWFLAKE"}
 }
 
@@ -91,7 +93,7 @@ func monitorDestRouters(routerDB, batchRouterDB *jobsdb.HandleT) {
 				for _, destination := range source.Destinations {
 					enabledDestinations[destination.DestinationDefinition.Name] = true
 					//For batch router destinations
-					if misc.Contains(objectStorageDestinations, destination.DestinationDefinition.Name) || misc.Contains(warehouseDestinations, destination.DestinationDefinition.Name) {
+					if misc.Contains(objectStorageDestinations, destination.DestinationDefinition.Name) || misc.Contains(objectStreamDestinations, destination.DestinationDefinition.Name) || misc.Contains(warehouseDestinations, destination.DestinationDefinition.Name) {
 						_, ok := dstToBatchRouter[destination.DestinationDefinition.Name]
 						if !ok {
 							logger.Info("Starting a new Batch Destination Router", destination.DestinationDefinition.Name)
