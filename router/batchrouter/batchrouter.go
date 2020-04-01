@@ -202,20 +202,20 @@ func (brt *HandleT) copyJobsToStorage(provider string, batchJobs BatchJobsT, mak
 	}
 
 	if isStreamDestination {
-		producer, err := streammanager.New(&streammanager.SettingsT{
+		producer, newerror := streammanager.New(&streammanager.SettingsT{
 			Provider: provider,
 			Config:   batchJobs.BatchDestination.Destination.Config.(map[string]interface{}),
 		})
-		if err != nil {
+		if newerror != nil {
 			panic(err)
 		}
 		_, err = producer.Produce(outputFile)
 	} else {
-		uploader, err := filemanager.New(&filemanager.SettingsT{
+		uploader, newerror := filemanager.New(&filemanager.SettingsT{
 			Provider: provider,
 			Config:   batchJobs.BatchDestination.Destination.Config.(map[string]interface{}),
 		})
-		if err != nil {
+		if newerror != nil {
 			panic(err)
 		}
 		_, err = uploader.Upload(outputFile, keyPrefixes...)

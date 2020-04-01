@@ -127,7 +127,7 @@ func getDataFromFile(file *os.File) []byte {
 		content = append(content, "\n"...)
 	}
 	file.Close()
-	s := string(content)
-	fmt.Println(s)
+	// s := string(content)
+	// fmt.Println(s)
 	return content
 }
