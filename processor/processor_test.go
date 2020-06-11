@@ -585,7 +585,7 @@ var _ = Describe("Processor", func() {
 			c.mockGatewayJobsDB.EXPECT().GetExecuting(gatewayCustomVal, 10000, nil).Return(emptyJobsList).Times(1)
 		})
 
-		It("should process ToRetry and Unprocessed jobs, when total events are less than sessionThreshold", func() {
+		FIt("should process ToRetry and Unprocessed jobs, when total events are less than sessionThreshold", func() {
 			var messages map[string]mockEventData = map[string]mockEventData{
 				// this message should be delivered only to destination A
 				"message-1": {
