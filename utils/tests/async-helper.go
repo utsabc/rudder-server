@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -53,10 +54,12 @@ func (helper *AsyncTestHelper) RegisterCalls(calls ...*gomock.Call) {
 // RunTestWithTimeout runs function f until provided timeout.
 // If the function times out, it will cause the ginkgo test to fail.
 func RunTestWithTimeout(f func(), d time.Duration) {
+	fmt.Println("Running f with timeout: ", d)
 	misc.RunWithTimeout(func() {
 		defer ginkgo.GinkgoRecover()
 		f()
 	}, func() {
+		fmt.Println("Timeout in test!!")
 		ginkgo.Fail("Async helper's wait group timed out")
 	}, d)
 }
