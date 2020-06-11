@@ -216,6 +216,7 @@ var _ = Describe("Processor", func() {
 	var c *context
 
 	BeforeEach(func() {
+		fmt.Println("Starting Test: ", CurrentGinkgoTestDescription().TestText)
 		c = &context{}
 		c.Setup()
 
@@ -225,7 +226,9 @@ var _ = Describe("Processor", func() {
 	})
 
 	AfterEach(func() {
+		fmt.Println("Finishing Test: ", CurrentGinkgoTestDescription().TestText)
 		c.Finish()
+		fmt.Println("Finished Test: ", CurrentGinkgoTestDescription().TestText)
 	})
 
 	XContext("Initialization", func() {
@@ -307,7 +310,7 @@ var _ = Describe("Processor", func() {
 		})
 	})
 
-	XContext("normal operation", func() {
+	Context("normal operation", func() {
 		BeforeEach(func() {
 			// crash recovery check
 			c.mockGatewayJobsDB.EXPECT().GetExecuting(gatewayCustomVal, 10000, nil).Return(emptyJobsList).Times(1)
