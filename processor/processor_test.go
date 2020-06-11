@@ -1121,6 +1121,8 @@ var _ = Describe("Processor", func() {
 			// make sure the mock backend config has sent the configuration
 			testutils.RunTestWithTimeout(func() {
 				for !c.configInitialised {
+					fmt.Println(".......    Waiting for config ...........")
+					time.Sleep(time.Second)
 				}
 			}, time.Second)
 			fmt.Println("SESSION TEST WAITED FOR CONFIG - RECEIVED")
@@ -1217,6 +1219,8 @@ var _ = Describe("Processor", func() {
 			// make sure the mock backend config has sent the configuration
 			testutils.RunTestWithTimeout(func() {
 				for !c.configInitialised {
+					fmt.Println(".......    Waiting for config ...........")
+					time.Sleep(time.Second)
 				}
 			}, time.Second)
 			fmt.Println("TRANSFORM TEST WAITED FOR CONFIG - RECEIVED")
