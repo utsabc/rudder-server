@@ -1209,16 +1209,23 @@ var _ = Describe("Processor", func() {
 				transformer: mockTransformer,
 			}
 
+			fmt.Println("TRANSFORM TEST BEFORE SETUP")
 			processor.Setup(c.mockBackendConfig, c.mockGatewayJobsDB, c.mockRouterJobsDB, c.mockBatchRouterJobsDB, c.mockStats)
+			fmt.Println("TRANSFORM TEST AFTER SETUP")
 
+			fmt.Println("TRANSFORM TEST WAITING FOR CONFIG")
 			// make sure the mock backend config has sent the configuration
 			testutils.RunTestWithTimeout(func() {
 				for !c.configInitialised {
 				}
 			}, time.Second)
+			fmt.Println("TRANSFORM TEST WAITED FOR CONFIG - RECEIVED")
 
+			fmt.Println("TRANSFORM TEST - DO WORK")
 			didWork := processor.handlePendingGatewayJobs()
+			fmt.Println("TRANSFORM TEST - DID WORK")
 			Expect(didWork).To(Equal(true))
+			fmt.Println("TRANSFORM TEST - ALL DONE")
 		})
 	})
 })
