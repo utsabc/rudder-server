@@ -56,7 +56,7 @@ func (helper *AsyncTestHelper) RegisterCalls(calls ...*gomock.Call) {
 func RunTestWithTimeout(f func(), d time.Duration) {
 	fmt.Println("Running f with timeout: ", d)
 	misc.RunWithTimeout(func() {
-		defer ginkgo.GinkgoRecover()
+		// defer ginkgo.GinkgoRecover()
 		f()
 	}, func() {
 		fmt.Println("Timeout in test!!")
