@@ -1113,16 +1113,23 @@ var _ = Describe("Processor", func() {
 				sessionThresholdEvents: 20, // this test will send 5 events
 			}
 
+			fmt.Println("SESSION TEST BEFORE SETUP")
 			processor.Setup(c.mockBackendConfig, c.mockGatewayJobsDB, c.mockRouterJobsDB, c.mockBatchRouterJobsDB, c.mockStats)
+			fmt.Println("SESSION TEST AFTER SETUP")
 
+			fmt.Println("SESSION TEST WAITING FOR CONFIG")
 			// make sure the mock backend config has sent the configuration
 			testutils.RunTestWithTimeout(func() {
 				for !c.configInitialised {
 				}
 			}, time.Second)
+			fmt.Println("SESSION TEST WAITED FOR CONFIG - RECEIVED")
 
+			fmt.Println("SESSION TEST - DO WORK")
 			didWork := processor.handlePendingGatewayJobs()
+			fmt.Println("SESSION TEST - DID WORK")
 			Expect(didWork).To(Equal(true))
+			fmt.Println("SESSION TEST - ALL DONE")
 		})
 	})
 
