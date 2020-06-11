@@ -307,7 +307,7 @@ var _ = Describe("Processor", func() {
 		})
 	})
 
-	XContext("normal operation", func() {
+	Context("normal operation", func() {
 		BeforeEach(func() {
 			// crash recovery check
 			c.mockGatewayJobsDB.EXPECT().GetExecuting(gatewayCustomVal, 10000, nil).Return(emptyJobsList).Times(1)
@@ -579,7 +579,7 @@ var _ = Describe("Processor", func() {
 		})
 	})
 
-	Context("sessions", func() {
+	XContext("sessions", func() {
 		BeforeEach(func() {
 			// crash recovery check
 			c.mockGatewayJobsDB.EXPECT().GetExecuting(gatewayCustomVal, 10000, nil).Return(emptyJobsList).Times(1)
