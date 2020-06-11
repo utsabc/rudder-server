@@ -24,11 +24,11 @@ phases:
       - DATE=$(date "+%F,%T")
       - VERSION=$(echo $GIT_BRANCH | tr "/" .)
       # Build Open source version
-      - ginkgo -mod vendor --cover -coverprofile=profile.out -covermode=atomic --trace --progress --skipPackage=tests ./...
+      - ginkgo -mod vendor --cover -coverprofile=profile.out -covermode=atomic --trace --progress --skipPackage=tests ./processor
       # Build Enterprise version
       - make enterprise-init
       - make enterprise-prepare-build
-      - ginkgo -mod vendor --cover -coverprofile=profile.out -covermode=atomic --trace --progress --skipPackage=tests ./...
+      - ginkgo -mod vendor --cover -coverprofile=profile.out -covermode=atomic --trace --progress --skipPackage=tests ./processor
 reports:
   GinkgoUnitTestReports:
     files:
