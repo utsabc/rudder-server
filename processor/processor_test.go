@@ -228,7 +228,7 @@ var _ = Describe("Processor", func() {
 		c.Finish()
 	})
 
-	XContext("Initialization", func() {
+	Context("Initialization", func() {
 		It("should initialize (no jobs to recover)", func() {
 			mockTransformer := mocksTransformer.NewMockTransformer(c.mockCtrl)
 			mockTransformer.EXPECT().Setup().Times(1)
@@ -307,7 +307,7 @@ var _ = Describe("Processor", func() {
 		})
 	})
 
-	XContext("normal operation", func() {
+	Context("normal operation", func() {
 		BeforeEach(func() {
 			// crash recovery check
 			c.mockGatewayJobsDB.EXPECT().GetExecuting(gatewayCustomVal, 10000, nil).Return(emptyJobsList).Times(1)
@@ -579,7 +579,7 @@ var _ = Describe("Processor", func() {
 		})
 	})
 
-	XContext("sessions", func() {
+	Context("sessions", func() {
 		BeforeEach(func() {
 			// crash recovery check
 			c.mockGatewayJobsDB.EXPECT().GetExecuting(gatewayCustomVal, 10000, nil).Return(emptyJobsList).Times(1)
