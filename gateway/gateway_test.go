@@ -42,6 +42,12 @@ const (
 	SourceIDDisabled          = "disabled-source"
 	TestRemoteAddressWithPort = "test.com:80"
 	TestRemoteAddress         = "test.com"
+	// These two go into same hash bucket with 64 workers
+	AnonymousOneHashOne = "1"
+	AnonymousTwoHashOne = "36"
+	// These two go into same hash bucket with 64 workers
+	AnonymousThreeHashTwo = "2"
+	AnonymousFourHashTwo  = "35"
 )
 
 var testTimeout = 5 * time.Second
@@ -110,10 +116,11 @@ func (c *context) Setup() {
 }
 
 func (c *context) Finish() {
-	c.asyncHelper.WaitWithTimeout(testTimeout)
+	c.asyncHelper.WaitWithTimeoutName("gateway-finish", testTimeout)
 	c.mockCtrl.Finish()
 }
 
+// Fix this
 // helper function to add expectations about a specific writeKey stat. Returns gomock.Call of RudderStats Count()
 func (c *context) expectWriteKeyStat(name string, writeKey string, count int) *gomock.Call {
 	mockStat := mocksStats.NewMockRudderStats(c.mockCtrl)
@@ -125,6 +132,19 @@ func (c *context) expectWriteKeyStat(name string, writeKey string, count int) *g
 	return mockStat.EXPECT().Count(count).
 		Times(1).
 		Do(c.asyncHelper.ExpectAndNotifyCallback())
+}
+
+// helper function to add expectations about a specific writeKey stat. Returns gomock.Call of RudderStats Count()
+func (c *context) expectWriteKeyStatTimes(name string, writeKey string, count int, times int) *gomock.Call {
+	mockStat := mocksStats.NewMockRudderStats(c.mockCtrl)
+
+	c.mockStats.EXPECT().NewWriteKeyStat(name, stats.CountType, writeKey).
+		Return(mockStat).Times(times).
+		Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(times))
+
+	return mockStat.EXPECT().Count(count).
+		Times(times).
+		Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(times))
 }
 
 var _ = Describe("Gateway", func() {
@@ -176,7 +196,6 @@ var _ = Describe("Gateway", func() {
 
 		assertJobMetadata := func(job *jobsdb.JobT, batchLength int, batchId int) {
 			Expect(misc.IsValidUUID(job.UUID.String())).To(Equal(true))
-			Expect(job.Parameters).To(Equal(json.RawMessage(fmt.Sprintf(`{"source_id": "%v", "batch_id": %d}`, SourceIDEnabled, batchId))))
 			Expect(job.CustomVal).To(Equal(CustomVal))
 
 			responseData := []byte(job.EventPayload)
@@ -184,18 +203,15 @@ var _ = Describe("Gateway", func() {
 			writeKey := gjson.GetBytes(responseData, "writeKey")
 			requestIP := gjson.GetBytes(responseData, "requestIP")
 			batch := gjson.GetBytes(responseData, "batch")
+			anonymousID := gjson.GetBytes(responseData, "batch.0.anonymousId").Str
+			workerID := gateway.getWorkerID(anonymousID)
 
 			Expect(time.Parse(misc.RFC3339Milli, receivedAt.String())).To(BeTemporally("~", time.Now(), 10*time.Millisecond))
 			Expect(writeKey.String()).To(Equal(WriteKeyEnabled))
 			Expect(requestIP.String()).To(Equal(TestRemoteAddress))
 			Expect(batch.Array()).To(HaveLen(batchLength))
-		}
 
-		createValidBody := func(customProperty string, customValue string) []byte {
-			validData := `{"data":{"string":"valid-json","nested":{"child":1}}}`
-			validDataWithProperty, _ := sjson.SetBytes([]byte(validData), customProperty, customValue)
-
-			return validDataWithProperty
+			Expect(job.Parameters).To(Equal(json.RawMessage(fmt.Sprintf(`{"source_id": "%v", "batch_id": %d, "user_worker_id": %d}`, SourceIDEnabled, batchId, workerID))))
 		}
 
 		assertJobBatchItem := func(payload gjson.Result) {
@@ -207,7 +223,6 @@ var _ = Describe("Gateway", func() {
 			Expect(messageID.Exists()).To(BeTrue())
 			Expect(messageID.String()).To(testutils.BeValidUUID())
 			Expect(anonymousID.Exists()).To(BeTrue())
-			Expect(anonymousID.String()).To(testutils.BeValidUUID())
 			Expect(messageType.Exists()).To(BeTrue())
 		}
 
@@ -259,7 +274,7 @@ var _ = Describe("Gateway", func() {
 					}).
 					Times(1)
 
-				expectHandlerResponse(handler, authorizedRequest(WriteKeyEnabled, bytes.NewBuffer(validBody)), 200, "OK")
+				expectHandlerResponse(handler, authorizedRequest(WriteKeyEnabled, AnonymousOneHashOne, bytes.NewBuffer(validBody)), 200, "OK", handlerType)
 			})
 		}
 
@@ -280,7 +295,7 @@ var _ = Describe("Gateway", func() {
 			handlerExpectation := func(handlerType string, handler http.HandlerFunc) *RequestExpectation {
 				// we add the handler type in custom property of request's body, to check that the type field is set correctly while batching
 				validBody := createValidBody("custom-property-type", handlerType)
-				validRequest := authorizedRequest(WriteKeyEnabled, bytes.NewBuffer(validBody))
+				validRequest := authorizedRequest(WriteKeyEnabled, AnonymousOneHashOne, bytes.NewBuffer(validBody))
 
 				return &RequestExpectation{
 					request:        validRequest,
@@ -348,6 +363,81 @@ var _ = Describe("Gateway", func() {
 
 			expectBatch(expectations)
 		})
+
+		// XIt("Should route same hashed userID requests to same worker", func() {
+
+		// 	handlerExpectations := func(handlerType string, handler http.HandlerFunc) []*RequestExpectation {
+		// 		// we add the handler type in custom property of request's body, to check that the type field is set correctly while batching
+		// 		validBody := createValidBody("custom-property-type", handlerType)
+
+		// 		requestExpectations := make([]*RequestExpectation, 0)
+		// 		requestExpectations = append(requestExpectations, &RequestExpectation{
+		// 			request:        authorizedRequest(WriteKeyEnabled, AnonymousOneHashOne, bytes.NewBuffer(validBody)),
+		// 			handler:        handler,
+		// 			responseStatus: 200,
+		// 			responseBody:   "OK",
+		// 		})
+		// 		requestExpectations = append(requestExpectations, &RequestExpectation{
+		// 			request:        authorizedRequest(WriteKeyEnabled, AnonymousTwoHashOne, bytes.NewBuffer(validBody)),
+		// 			handler:        handler,
+		// 			responseStatus: 200,
+		// 			responseBody:   "OK",
+		// 		})
+		// 		requestExpectations = append(requestExpectations, &RequestExpectation{
+		// 			request:        authorizedRequest(WriteKeyEnabled, AnonymousThreeHashTwo, bytes.NewBuffer(validBody)),
+		// 			handler:        handler,
+		// 			responseStatus: 200,
+		// 			responseBody:   "OK",
+		// 		})
+		// 		requestExpectations = append(requestExpectations, &RequestExpectation{
+		// 			request:        authorizedRequest(WriteKeyEnabled, AnonymousFourHashTwo, bytes.NewBuffer(validBody)),
+		// 			handler:        handler,
+		// 			responseStatus: 200,
+		// 			responseBody:   "OK",
+		// 		})
+
+		// 		return requestExpectations
+		// 	}
+
+		// 	callStart := c.mockStatGatewayBatchTime.EXPECT().Start().Times(1).Do(c.asyncHelper.ExpectAndNotifyCallback())
+
+		// 	callStore := c.mockJobsDB.
+		// 		EXPECT().StoreWithRetryEach(gomock.Any()).
+		// 		DoAndReturn(func(jobs []*jobsdb.JobT) map[uuid.UUID]string {
+		// 			// will collect all message handler types, found in jobs send to Store function
+		// 			typesFound := make(map[string]bool, 4)
+
+		// 			// All jobs should belong to the same batchId
+		// 			expectedBatchID := nextBatchID()
+
+		// 			for _, job := range jobs {
+		// 				assertJobMetadata(job, 1, expectedBatchID)
+
+		// 				responseData := []byte(job.EventPayload)
+		// 				payload := gjson.GetBytes(responseData, "batch.0")
+
+		// 				assertJobBatchItem(payload)
+
+		// 				messageType := payload.Get("type").String()
+		// 				Expect(stripJobPayload(payload)).To(MatchJSON(createValidBody("custom-property-type", messageType)))
+
+		// 				typesFound[messageType] = true
+		// 			}
+
+		// 			c.asyncHelper.ExpectAndNotifyCallback()()
+
+		// 			return jobsToEmptyErrors(jobs)
+		// 		}).
+		// 		Times(1)
+
+		// 	c.mockStatGatewayBatchTime.EXPECT().End().After(callStart).After(callStore).Times(1).Do(c.asyncHelper.ExpectAndNotifyCallback())
+
+		// 	expectations := handlerExpectations("track", gateway.webTrackHandler)
+
+		// 	expectBatch(expectations)
+
+		// })
+
 	})
 
 	Context("Rate limits", func() {
@@ -376,7 +466,7 @@ var _ = Describe("Gateway", func() {
 			c.expectWriteKeyStat("gateway.write_key_events", WriteKeyEnabled, 0)
 			c.expectWriteKeyStat("gateway.write_key_successful_events", WriteKeyEnabled, 0)
 
-			expectHandlerResponse(gateway.webAliasHandler, authorizedRequest(WriteKeyEnabled, bytes.NewBufferString("{}")), 200, "OK")
+			expectHandlerResponse(gateway.webAliasHandler, authorizedRequest(WriteKeyEnabled, AnonymousOneHashOne, bytes.NewBufferString("{}")), 200, "OK", "")
 		})
 
 		It("should reject messages if rate limit is reached for workspace", func() {
@@ -393,7 +483,71 @@ var _ = Describe("Gateway", func() {
 			c.expectWriteKeyStat("gateway.write_key_requests", WriteKeyEnabled, 1)
 			c.expectWriteKeyStat("gateway.work_space_dropped_requests", workspaceID, 1)
 
-			expectHandlerResponse(gateway.webAliasHandler, authorizedRequest(WriteKeyEnabled, bytes.NewBufferString("{}")), 400, TooManyRequests+"\n")
+			expectHandlerResponse(gateway.webAliasHandler, authorizedRequest(WriteKeyEnabled, AnonymousOneHashOne, bytes.NewBufferString("{}")), 400, TooManyRequests+"\n", "rate-limit")
+		})
+	})
+
+	Context("User based Request routing", func() {
+		var (
+			gateway      = &HandleT{}
+			clearDB bool = false
+		)
+		BeforeEach(func() {
+			// SetEnableRateLimit(true)
+			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, c.mockRateLimiter, c.mockStats, &clearDB)
+		})
+
+		FIt("X", func() {
+			workspaceID := "some-workspace-id"
+			userRequestExpectations := func(handlerType string, handler http.HandlerFunc) []*RequestExpectation {
+				// we add the handler type in custom property of request's body, to check that the type field is set correctly while batching
+				validBody := createValidBody("custom-property-type", handlerType)
+
+				requestExpectations := make([]*RequestExpectation, 0)
+				requestExpectations = append(requestExpectations, &RequestExpectation{
+					request:        authorizedRequest(WriteKeyEnabled, AnonymousOneHashOne, bytes.NewBuffer(validBody)),
+					handler:        handler,
+					responseStatus: 200,
+					responseBody:   "OK",
+				})
+				requestExpectations = append(requestExpectations, &RequestExpectation{
+					request:        authorizedRequest(WriteKeyEnabled, AnonymousTwoHashOne, bytes.NewBuffer(validBody)),
+					handler:        handler,
+					responseStatus: 200,
+					responseBody:   "OK",
+				})
+				requestExpectations = append(requestExpectations, &RequestExpectation{
+					request:        authorizedRequest(WriteKeyEnabled, AnonymousThreeHashTwo, bytes.NewBuffer(validBody)),
+					handler:        handler,
+					responseStatus: 200,
+					responseBody:   "OK",
+				})
+				requestExpectations = append(requestExpectations, &RequestExpectation{
+					request:        authorizedRequest(WriteKeyEnabled, AnonymousFourHashTwo, bytes.NewBuffer(validBody)),
+					handler:        handler,
+					responseStatus: 200,
+					responseBody:   "OK",
+				})
+
+				return requestExpectations
+			}
+
+			callStart := c.mockStatGatewayBatchTime.EXPECT().Start().Times(2).Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(2))
+			c.mockBackendConfig.EXPECT().GetWorkspaceIDForWriteKey(WriteKeyEnabled).Return(workspaceID).AnyTimes().Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(2))
+			// c.mockRateLimiter.EXPECT().LimitReached(workspaceID).Return(false).Times(1).Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(2))
+			c.mockJobsDB.EXPECT().StoreWithRetryEach(gomock.Any()).DoAndReturn(jobsToEmptyErrors).Times(2).Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(2))
+			// .After(callStore)
+			c.mockStatGatewayBatchTime.EXPECT().End().After(callStart).Times(2).Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(2))
+			// .After(callEnd)
+			c.mockStatGatewayBatchSize.EXPECT().Count(2).Times(2).Do(c.asyncHelper.ExpectAndNotifyCallbackTimes(2))
+
+			c.expectWriteKeyStatTimes("gateway.write_key_requests", WriteKeyEnabled, 2, 2)
+			c.expectWriteKeyStatTimes("gateway.write_key_successful_requests", WriteKeyEnabled, 2, 2)
+			c.expectWriteKeyStatTimes("gateway.write_key_events", WriteKeyEnabled, 0, 2)
+			c.expectWriteKeyStatTimes("gateway.write_key_successful_events", WriteKeyEnabled, 0, 2)
+
+			expectations := userRequestExpectations("page", gateway.webPageHandler)
+			expectBatch(expectations)
 		})
 	})
 
@@ -429,7 +583,7 @@ var _ = Describe("Gateway", func() {
 				c.expectWriteKeyStat("gateway.write_key_requests", "", 1)
 				c.expectWriteKeyStat("gateway.write_key_failed_requests", "noWriteKey", 1)
 
-				expectHandlerResponse(handler, unauthorizedRequest(nil), 400, NoWriteKeyInBasicAuth+"\n")
+				expectHandlerResponse(handler, unauthorizedRequest(nil), 400, NoWriteKeyInBasicAuth+"\n", "no-auth")
 			})
 
 			It("should reject requests without username in Authorization header", func() {
@@ -439,7 +593,7 @@ var _ = Describe("Gateway", func() {
 				c.expectWriteKeyStat("gateway.write_key_requests", "", 1)
 				c.expectWriteKeyStat("gateway.write_key_failed_requests", "noWriteKey", 1)
 
-				expectHandlerResponse(handler, authorizedRequest(WriteKeyEmpty, nil), 400, NoWriteKeyInBasicAuth+"\n")
+				expectHandlerResponse(handler, authorizedRequest(WriteKeyEmpty, AnonymousOneHashOne, nil), 400, NoWriteKeyInBasicAuth+"\n", "no-auth")
 			})
 
 			It("should reject requests without request body", func() {
@@ -448,7 +602,7 @@ var _ = Describe("Gateway", func() {
 
 				c.expectWriteKeyStat("gateway.write_key_requests", WriteKeyInvalid, 1)
 
-				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, nil), 400, RequestBodyNil+"\n")
+				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, AnonymousOneHashOne, nil), 400, RequestBodyNil+"\n", "no-body")
 			})
 
 			It("should reject requests without valid json in request body", func() {
@@ -460,7 +614,7 @@ var _ = Describe("Gateway", func() {
 				c.expectWriteKeyStat("gateway.write_key_requests", WriteKeyInvalid, 1)
 				c.expectWriteKeyStat("gateway.write_key_failed_requests", WriteKeyInvalid, 1)
 
-				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, bytes.NewBufferString(invalidBody)), 400, InvalidJSON+"\n")
+				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, AnonymousOneHashOne, bytes.NewBufferString(invalidBody)), 400, InvalidJSON+"\n", "invalid-json")
 			})
 
 			It("should reject requests with request bodies larger than configured limit", func() {
@@ -478,7 +632,7 @@ var _ = Describe("Gateway", func() {
 				c.expectWriteKeyStat("gateway.write_key_events", WriteKeyInvalid, 0)
 				c.expectWriteKeyStat("gateway.write_key_failed_events", WriteKeyInvalid, 0)
 
-				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, bytes.NewBufferString(body)), 400, RequestBodyTooLarge+"\n")
+				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, AnonymousOneHashOne, bytes.NewBufferString(body)), 400, RequestBodyTooLarge+"\n", "body-too-large")
 			})
 
 			It("should reject requests with invalid write keys", func() {
@@ -492,7 +646,7 @@ var _ = Describe("Gateway", func() {
 				c.expectWriteKeyStat("gateway.write_key_events", WriteKeyInvalid, 0)
 				c.expectWriteKeyStat("gateway.write_key_failed_events", WriteKeyInvalid, 0)
 
-				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, bytes.NewBufferString(validBody)), 400, InvalidWriteKey+"\n")
+				expectHandlerResponse(handler, authorizedRequest(WriteKeyInvalid, AnonymousOneHashOne, bytes.NewBufferString(validBody)), 400, InvalidWriteKey+"\n", "invalid-write-key")
 			})
 
 			It("should reject requests with disabled write keys", func() {
@@ -506,7 +660,7 @@ var _ = Describe("Gateway", func() {
 				c.expectWriteKeyStat("gateway.write_key_events", WriteKeyDisabled, 0)
 				c.expectWriteKeyStat("gateway.write_key_failed_events", WriteKeyDisabled, 0)
 
-				expectHandlerResponse(handler, authorizedRequest(WriteKeyDisabled, bytes.NewBufferString(validBody)), 400, InvalidWriteKey+"\n")
+				expectHandlerResponse(handler, authorizedRequest(WriteKeyDisabled, AnonymousOneHashOne, bytes.NewBufferString(validBody)), 400, InvalidWriteKey+"\n", "disabled-write-key")
 			})
 		}
 
@@ -515,6 +669,13 @@ var _ = Describe("Gateway", func() {
 		}
 	})
 })
+
+func createValidBody(customProperty string, customValue string) []byte {
+	validData := `{"data":{"string":"valid-json","nested":{"child":1}}}`
+	validDataWithProperty, _ := sjson.SetBytes([]byte(validData), customProperty, customValue)
+
+	return validDataWithProperty
+}
 
 func unauthorizedRequest(body io.Reader) *http.Request {
 	req, err := http.NewRequest("GET", "", body)
@@ -525,20 +686,20 @@ func unauthorizedRequest(body io.Reader) *http.Request {
 	return req
 }
 
-func authorizedRequest(username string, body io.Reader) *http.Request {
+func authorizedRequest(username string, anonymousID string, body io.Reader) *http.Request {
 	req := unauthorizedRequest(body)
 
 	basicAuth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:password-should-be-ignored", username)))
 
 	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", basicAuth))
 	// set anonymousId header to ensure everything goes into same batch
-	req.Header.Set("AnonymousId", "094985f8-b4eb-43c3-bc8a-e8b75aae9c7c")
+	req.Header.Set("AnonymousId", anonymousID)
 	req.RemoteAddr = TestRemoteAddressWithPort
 	return req
 }
 
-func expectHandlerResponse(handler http.HandlerFunc, req *http.Request, responseStatus int, responseBody string) {
-	testutils.RunTestWithTimeout(func() {
+func expectHandlerResponse(handler http.HandlerFunc, req *http.Request, responseStatus int, responseBody string, name string) {
+	testutils.RunTestWithTimeoutName(func() {
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 
@@ -547,7 +708,7 @@ func expectHandlerResponse(handler http.HandlerFunc, req *http.Request, response
 
 		Expect(rr.Result().StatusCode).To(Equal(responseStatus))
 		Expect(body).To(Equal(responseBody))
-	}, testTimeout)
+	}, name, testTimeout)
 }
 
 type RequestExpectation struct {
@@ -560,20 +721,25 @@ type RequestExpectation struct {
 func expectBatch(expectations []*RequestExpectation) {
 	c := make(chan struct{})
 
-	for _, x := range expectations {
+	for idx, x := range expectations {
+		reqIndex := idx
 		go func(e *RequestExpectation) {
 			defer GinkgoRecover()
-			expectHandlerResponse(e.handler, e.request, e.responseStatus, e.responseBody)
+			expectHandlerResponse(e.handler, e.request, e.responseStatus, e.responseBody, fmt.Sprint(reqIndex))
 			c <- struct{}{}
 		}(x)
 	}
 
-	misc.RunWithTimeout(func() {
+	misc.RunWithTimeout1(func() {
+		fmt.Println("Sumanth[GT] Waiting for expectations to complete: ", len(expectations))
+
 		for range expectations {
 			<-c
+			fmt.Println("Sumanth[GT] Got an expectation complete")
 		}
+		fmt.Println("Sumanth[GT] Yay!")
 	}, func() {
-		Fail("Not all batch requests responded on time")
+		Fail("Sumanth[GT] Not all batch requests responded on time")
 	}, testTimeout)
 }
 

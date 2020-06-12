@@ -674,10 +674,30 @@ func RunWithTimeout(f func(), onTimeout func(), d time.Duration) {
 	go func() {
 		defer close(c)
 		f()
+		fmt.Println("Test completed")
 	}()
 
+	fmt.Println("Waiting for the func complete")
 	select {
 	case <-c:
+		fmt.Println("I am here after channel closed")
+	case <-time.After(d):
+		onTimeout()
+	}
+}
+
+func RunWithTimeout1(f func(), onTimeout func(), d time.Duration) {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		f()
+		fmt.Println("Sumanth[Misc] Test completed")
+	}()
+
+	fmt.Println("Sumanth[Misc] Waiting for the func complete")
+	select {
+	case <-c:
+		fmt.Println("Sumanth[Misc] I am here after channel closed")
 	case <-time.After(d):
 		onTimeout()
 	}

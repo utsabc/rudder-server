@@ -72,6 +72,10 @@ var (
 	dedupWindow, diagnosisTickerTime                            time.Duration
 )
 
+const (
+	AnonymousIDHeader = "AnonymousId"
+)
+
 // CustomVal is used as a key in the jobsDB customval column
 var CustomVal string
 
@@ -211,10 +215,13 @@ func (gateway *HandleT) dbWriterWorkerProcess(process int) {
 	}
 }
 
+func (gateway *HandleT) getWorkerID(userID string) int {
+	return int(math.Abs(float64(misc.GetHash(userID) % maxUserWebRequestWorkerProcess)))
+}
+
 func (gateway *HandleT) findUserWebRequestWorker(userID string) *userWebRequestWorkerT {
 
-	index := int(math.Abs(float64(misc.GetHash(userID) % maxUserWebRequestWorkerProcess)))
-
+	index := gateway.getWorkerID(userID)
 	userWebRequestWorker := gateway.userWebRequestWorkers[index]
 	if userWebRequestWorker == nil {
 		panic(fmt.Errorf("worker is nil"))
@@ -340,7 +347,11 @@ func (gateway *HandleT) userWebRequestWorkerProcess(userWebRequestWorker *userWe
 			// set anonymousId if not set in payload
 			var index int
 			result := gjson.GetBytes(body, "batch")
-			newAnonymousID := uuid.NewV4().String()
+			newAnonymousID := req.request.Header.Get(AnonymousIDHeader)
+			if newAnonymousID == "" {
+				newAnonymousID = uuid.NewV4().String()
+			}
+
 			var reqMessageIDs []string
 			result.ForEach(func(_, _ gjson.Result) bool {
 				if strings.TrimSpace(gjson.GetBytes(body, fmt.Sprintf(`batch.%v.anonymousId`, index)).String()) == "" {
@@ -378,7 +389,7 @@ func (gateway *HandleT) userWebRequestWorkerProcess(userWebRequestWorker *userWe
 			newJob := jobsdb.JobT{
 				UUID:         id,
 				UserID:       gjson.GetBytes(body, "batch.0.anonymousId").Str,
-				Parameters:   []byte(fmt.Sprintf(`{"source_id": "%v", "batch_id": %d}`, enabledWriteKeysSourceMap[writeKey], counter)),
+				Parameters:   []byte(fmt.Sprintf(`{"source_id": "%v", "batch_id": %d, "user_worker_id": %d}`, enabledWriteKeysSourceMap[writeKey], counter, userWebRequestWorker.workerID)),
 				CustomVal:    CustomVal,
 				EventPayload: []byte(body),
 			}

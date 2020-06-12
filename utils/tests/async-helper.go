@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -29,7 +30,14 @@ type AsyncTestHelper struct {
 // ExpectAndNotifyCallback Adds one to this helper's WaitGroup, and provides a callback that calls Done on it.
 // Should be used for gomock Do calls that trigger via mocked functions executed in a goroutine.
 func (helper *AsyncTestHelper) ExpectAndNotifyCallback() func(...interface{}) {
-	helper.wg.Add(1)
+	return helper.ExpectAndNotifyCallbackTimes(1)
+}
+
+// TODO: Update the comment
+// ExpectAndNotifyCallbackTimes Adds one to this helper's WaitGroup, and provides a callback that calls Done on it.
+// Should be used for gomock Do calls that trigger via mocked functions executed in a goroutine.
+func (helper *AsyncTestHelper) ExpectAndNotifyCallbackTimes(times int) func(...interface{}) {
+	helper.wg.Add(times)
 	return func(...interface{}) {
 		helper.wg.Done()
 	}
@@ -38,9 +46,15 @@ func (helper *AsyncTestHelper) ExpectAndNotifyCallback() func(...interface{}) {
 // WaitWithTimeout waits for this helper's WaitGroup until provided timeout.
 // Should wait for all ExpectAndNotifyCallback callbacks, registered in asynchronous mocks calls
 func (helper *AsyncTestHelper) WaitWithTimeout(d time.Duration) {
-	RunTestWithTimeout(func() {
+	helper.WaitWithTimeoutName("", d)
+}
+
+// WaitWithTimeoutName waits for this helper's WaitGroup until provided timeout.
+// Should wait for all ExpectAndNotifyCallback callbacks, registered in asynchronous mocks calls
+func (helper *AsyncTestHelper) WaitWithTimeoutName(name string, d time.Duration) {
+	RunTestWithTimeoutName(func() {
 		helper.wg.Wait()
-	}, d)
+	}, name, d)
 }
 
 // RegisterCalls registers a number of calls to this async helper, so that they are waited for.
@@ -50,13 +64,19 @@ func (helper *AsyncTestHelper) RegisterCalls(calls ...*gomock.Call) {
 	}
 }
 
-// RunTestWithTimeout runs function f until provided timeout.
+// RunTestWithTimeoutName runs function f until provided timeout.
 // If the function times out, it will cause the ginkgo test to fail.
-func RunTestWithTimeout(f func(), d time.Duration) {
+func RunTestWithTimeoutName(f func(), name string, d time.Duration) {
 	misc.RunWithTimeout(func() {
 		defer ginkgo.GinkgoRecover()
 		f()
 	}, func() {
-		ginkgo.Fail("Async helper's wait group timed out")
+		ginkgo.Fail(fmt.Sprintf("Async helper's wait group timed out: %s", name))
 	}, d)
+}
+
+// RunTestWithTimeout runs function f until provided timeout.
+// If the function times out, it will cause the ginkgo test to fail.
+func RunTestWithTimeout(f func(), d time.Duration) {
+	RunTestWithTimeoutName(f, "", d)
 }
