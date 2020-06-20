@@ -81,6 +81,7 @@ type context struct {
 	mockStatGatewayResponseTime *mocksStats.MockRudderStats
 	mockStatGatewayBatchSize    *mocksStats.MockRudderStats
 	mockStatGatewayBatchTime    *mocksStats.MockRudderStats
+	mockVersionHandler          func(w http.ResponseWriter, r *http.Request)
 }
 
 // Initiaze mocks and common expectations
@@ -113,6 +114,7 @@ func (c *context) Setup() {
 		}).
 		Do(c.asyncHelper.ExpectAndNotifyCallback()).
 		Return().Times(1)
+	c.mockVersionHandler = func(w http.ResponseWriter, r *http.Request) {}
 }
 
 func (c *context) Finish() {
@@ -172,7 +174,7 @@ var _ = Describe("Gateway", func() {
 		var clearDB = false
 
 		It("should wait for backend config", func() {
-			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, nil, c.mockStats, &clearDB)
+			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, nil, c.mockStats, &clearDB, c.mockVersionHandler)
 		})
 	})
 
@@ -191,7 +193,7 @@ var _ = Describe("Gateway", func() {
 		}
 
 		BeforeEach(func() {
-			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, nil, c.mockStats, &clearDB)
+			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, nil, c.mockStats, &clearDB, c.mockVersionHandler)
 		})
 
 		assertJobMetadata := func(job *jobsdb.JobT, batchLength int, batchId int) {
@@ -448,7 +450,7 @@ var _ = Describe("Gateway", func() {
 
 		BeforeEach(func() {
 			SetEnableRateLimit(true)
-			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, c.mockRateLimiter, c.mockStats, &clearDB)
+			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, c.mockRateLimiter, c.mockStats, &clearDB, c.mockVersionHandler)
 		})
 
 		It("should store messages successfuly if rate limit is not reached for workspace", func() {
@@ -571,7 +573,7 @@ var _ = Describe("Gateway", func() {
 
 			c.mockStatGatewayBatchTime.EXPECT().End().After(callStart).After(callStore).Times(1).Do(c.asyncHelper.ExpectAndNotifyCallback())
 
-			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, nil, c.mockStats, &clearDB)
+			gateway.Setup(c.mockApp, c.mockBackendConfig, c.mockJobsDB, nil, c.mockStats, &clearDB, c.mockVersionHandler)
 		})
 
 		// common tests for all web handlers
