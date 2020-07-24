@@ -27,7 +27,7 @@ const (
 	UserTransformerStage = "user_transformer"
 	DestTransformerStage = "dest_transformer"
 )
-const supportedTransformerAPIVersion = 1
+const supportedTransformerAPIVersion = 2
 
 type MetadataT struct {
 	SourceID        string `json:"sourceId"`
