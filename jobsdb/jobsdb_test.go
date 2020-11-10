@@ -106,7 +106,7 @@ var _ = Describe("Calculate newDSIdx for cluster migrations", func() {
 			Expect(err != nil).Should(BeTrue())
 		},
 
-		Entry("ClusterMigration Case 1",
+		Entry("Error Case 1",
 			[]dataSetT{
 				dataSetT{
 					JobTable:       "",
@@ -121,7 +121,7 @@ var _ = Describe("Calculate newDSIdx for cluster migrations", func() {
 			},
 		),
 
-		Entry("ClusterMigration Case 2",
+		Entry("Error Case 2",
 			[]dataSetT{
 				dataSetT{
 					JobTable:       "",
@@ -141,7 +141,7 @@ var _ = Describe("Calculate newDSIdx for cluster migrations", func() {
 			},
 		),
 
-		Entry("ClusterMigration Case 4",
+		Entry("Error Case 4",
 			[]dataSetT{},
 			dataSetT{
 				JobTable:       "",
@@ -150,7 +150,7 @@ var _ = Describe("Calculate newDSIdx for cluster migrations", func() {
 			},
 		),
 
-		Entry("ClusterMigration Case 5",
+		Entry("Error Case 5",
 			[]dataSetT{},
 			dataSetT{
 				JobTable:       "",
@@ -159,7 +159,76 @@ var _ = Describe("Calculate newDSIdx for cluster migrations", func() {
 			},
 		),
 
-		Entry("ClusterMigration Case 6",
+		Entry("Error Case 6",
+			[]dataSetT{},
+			dataSetT{
+				JobTable:       "",
+				JobStatusTable: "",
+				Index:          "1_1_!_1",
+			},
+		),
+	)
+
+	var _ = DescribeTable("dsComparitor Tests",
+		func(src, dst []string, expectedValue, errored bool) {
+			comparison, err := dsComparitor(src, dst)
+			Expect(err != nil).Should(BeTrue())
+		},
+
+		Entry("Error Case 1",
+			[]dataSetT{
+				dataSetT{
+					JobTable:       "",
+					JobStatusTable: "",
+					Index:          "1_1",
+				},
+			},
+			dataSetT{
+				JobTable:       "",
+				JobStatusTable: "",
+				Index:          "1_1",
+			},
+		),
+
+		Entry("Error Case 2",
+			[]dataSetT{
+				dataSetT{
+					JobTable:       "",
+					JobStatusTable: "",
+					Index:          "1",
+				},
+				dataSetT{
+					JobTable:       "",
+					JobStatusTable: "",
+					Index:          "1_1",
+				},
+			},
+			dataSetT{
+				JobTable:       "",
+				JobStatusTable: "",
+				Index:          "1_1",
+			},
+		),
+
+		Entry("Error Case 4",
+			[]dataSetT{},
+			dataSetT{
+				JobTable:       "",
+				JobStatusTable: "",
+				Index:          "1_1",
+			},
+		),
+
+		Entry("Error Case 5",
+			[]dataSetT{},
+			dataSetT{
+				JobTable:       "",
+				JobStatusTable: "",
+				Index:          "1_1_1_1",
+			},
+		),
+
+		Entry("Error Case 6",
 			[]dataSetT{},
 			dataSetT{
 				JobTable:       "",
