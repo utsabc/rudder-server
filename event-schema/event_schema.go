@@ -41,6 +41,7 @@ import (
 	"github.com/rudderlabs/rudder-server/config"
 	"github.com/rudderlabs/rudder-server/jobsdb"
 	"github.com/rudderlabs/rudder-server/rruntime"
+	"github.com/rudderlabs/rudder-server/services/stats"
 	"github.com/rudderlabs/rudder-server/utils/logger"
 	"github.com/rudderlabs/rudder-server/utils/misc"
 	uuid "github.com/satori/go.uuid"
@@ -103,15 +104,16 @@ type EventSchemaManagerT struct {
 }
 
 var (
-	flushInterval         time.Duration
-	adminUser             string
-	adminPassword         string
-	reservoirSampleSize   int
-	eventSchemaChannel    chan *GatewayEventBatchT
-	updatedEventModels    map[string]*EventModelT
-	updatedSchemaVersions map[string]*SchemaVersionT
-	pkgLogger             logger.LoggerI
-	noOfWorkers			  int
+	flushInterval              time.Duration
+	adminUser                  string
+	adminPassword              string
+	reservoirSampleSize        int
+	eventSchemaChannel         chan *GatewayEventBatchT
+	updatedEventModels         map[string]*EventModelT
+	updatedSchemaVersions      map[string]*SchemaVersionT
+	pkgLogger                  logger.LoggerI
+	noOfWorkers                int
+	shouldCaptureNilAsUnknowns bool
 )
 
 const EVENT_MODELS_TABLE = "event_models"
@@ -139,6 +141,7 @@ func loadConfig() {
 	adminPassword = config.GetEnv("RUDDER_ADMIN_PASSWORD", "rudderstack")
 	reservoirSampleSize = config.GetInt("EventSchemas.sampleEventsSize", 5)
 	noOfWorkers = config.GetInt("EventSchemas.noOfWorkers", 128)
+	shouldCaptureNilAsUnknowns = config.GetBool("EventSchemas.captureUnknowns", false)
 
 	if adminPassword == "rudderstack" {
 		fmt.Println("[EventSchemas] You are using default password. Please change it by setting env variable RUDDER_ADMIN_PASSWORD")
@@ -152,7 +155,11 @@ func init() {
 
 //RecordEventSchema : Records event schema for every event in the batch
 func (manager *EventSchemaManagerT) RecordEventSchema(writeKey string, eventBatch string) bool {
-	eventSchemaChannel <- &GatewayEventBatchT{writeKey, eventBatch}
+	select {
+	case eventSchemaChannel <- &GatewayEventBatchT{writeKey, eventBatch}:
+	default:
+		stats.NewTaggedStat("eventSchemas.droppedEventsCount", stats.CountType, nil).Increment()
+	}
 	return true
 }
 
@@ -563,8 +570,10 @@ func getSchema(flattenedEvent map[string]interface{}) map[string]string {
 		if reflectType != nil {
 			schema[k] = reflectType.String()
 		} else {
-			schema[k] = "unknown"
-			pkgLogger.Errorf("[EventSchemas] Got invalid reflectType %+v", v)
+			if !(v == nil && !shouldCaptureNilAsUnknowns) {
+				schema[k] = "unknown"
+				pkgLogger.Errorf("[EventSchemas] Got invalid reflectType %+v", v)
+			}
 		}
 	}
 	return schema
