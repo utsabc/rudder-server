@@ -77,6 +77,7 @@ enableRateLimit = false
 enableSuppressUserFeature = true
 allowPartialWriteWithErrors = true
 allowReqsWithoutUserIDAndAnonymousID = false
+maxDBWriterQueueSize = 1000
 
 [EventSchemas]
 enableEventSchemasFeature = false

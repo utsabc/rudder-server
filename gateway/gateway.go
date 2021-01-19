@@ -60,22 +60,22 @@ type batchWebRequestT struct {
 }
 
 var (
-	webPort, maxUserWebRequestWorkerProcess, maxDBWriterProcess int
-	maxUserWebRequestBatchSize, maxDBBatchSize                  int
-	userWebRequestBatchTimeout, dbBatchWriteTimeout             time.Duration
-	enabledWriteKeysSourceMap                                   map[string]backendconfig.SourceT
-	enabledWriteKeyWebhookMap                                   map[string]string
-	sourceIDToNameMap                                           map[string]string
-	configSubscriberLock                                        sync.RWMutex
-	maxReqSize                                                  int
-	enableDedup                                                 bool
-	enableRateLimit                                             bool
-	enableSuppressUserFeature                                   bool
-	enableEventSchemasFeature                                   bool
-	diagnosisTickerTime                                         time.Duration
-	allowReqsWithoutUserIDAndAnonymousID                        bool
-	pkgLogger                                                   logger.LoggerI
-	Diagnostics                                                 diagnostics.DiagnosticsI = diagnostics.Diagnostics
+	webPort, maxUserWebRequestWorkerProcess, maxDBWriterProcess      int
+	maxUserWebRequestBatchSize, maxDBBatchSize, maxDBWriterQueueSize int
+	userWebRequestBatchTimeout, dbBatchWriteTimeout                  time.Duration
+	enabledWriteKeysSourceMap                                        map[string]backendconfig.SourceT
+	enabledWriteKeyWebhookMap                                        map[string]string
+	sourceIDToNameMap                                                map[string]string
+	configSubscriberLock                                             sync.RWMutex
+	maxReqSize                                                       int
+	enableDedup                                                      bool
+	enableRateLimit                                                  bool
+	enableSuppressUserFeature                                        bool
+	enableEventSchemasFeature                                        bool
+	diagnosisTickerTime                                              time.Duration
+	allowReqsWithoutUserIDAndAnonymousID                             bool
+	pkgLogger                                                        logger.LoggerI
+	Diagnostics                                                      diagnostics.DiagnosticsI = diagnostics.Diagnostics
 )
 
 // CustomVal is used as a key in the jobsDB customval column
@@ -157,7 +157,7 @@ func (gateway *HandleT) initUserWebRequestWorkers() {
 		var userWebRequestWorker *userWebRequestWorkerT
 		userWebRequestWorker = &userWebRequestWorkerT{
 			webRequestQ:    make(chan *webRequestT, maxUserWebRequestBatchSize),
-			batchRequestQ:  make(chan *batchWebRequestT),
+			batchRequestQ:  make(chan *batchWebRequestT, maxDBWriterQueueSize),
 			reponseQ:       make(chan map[uuid.UUID]string),
 			workerID:       i,
 			batchTimeStat:  gateway.stats.NewStat("gateway.batch_time", stats.TimerType),
@@ -250,6 +250,24 @@ func (gateway *HandleT) findUserWebRequestWorker(userID string) *userWebRequestW
 	return userWebRequestWorker
 }
 
+func (gateway *HandleT) addToBatchRequestQ(userWebRequestWorker *userWebRequestWorkerT, typeOfReq string, breq batchWebRequestT) {
+	select {
+	case userWebRequestWorker.batchRequestQ <- &breq:
+		if typeOfReq == "batch" {
+			userWebRequestWorker.bufferFullStat.Count(1)
+		} else if typeOfReq == "timeout" {
+			userWebRequestWorker.timeOutStat.Count(1)
+		}
+	default:
+		for _, req := range breq.batchRequest {
+			gateway.logger.Info("Dropped Event")
+			req.done <- "GateWay Overload"
+			fmt.Println("Event Dropped")
+			stats.NewTaggedStat("gateway_dropped_events_count", stats.CountType, stats.Tags{"module": "gateway_event_drop"}).Increment()
+		}
+	}
+}
+
 //Function to process the batch requests. It saves data in DB and
 //sends and ACK on the done channel which unblocks the HTTP handler
 func (gateway *HandleT) userWebRequestBatcher(userWebRequestWorker *userWebRequestWorkerT) {
@@ -263,8 +281,7 @@ func (gateway *HandleT) userWebRequestBatcher(userWebRequestWorker *userWebReque
 			reqBuffer = append(reqBuffer, req)
 			if len(reqBuffer) == maxUserWebRequestBatchSize {
 				breq := batchWebRequestT{batchRequest: reqBuffer}
-				userWebRequestWorker.bufferFullStat.Count(1)
-				userWebRequestWorker.batchRequestQ <- &breq
+				gateway.addToBatchRequestQ(userWebRequestWorker, "batch", breq)
 				reqBuffer = nil
 				reqBuffer = make([]*webRequestT, 0)
 			}
@@ -272,8 +289,7 @@ func (gateway *HandleT) userWebRequestBatcher(userWebRequestWorker *userWebReque
 			timeout = time.After(userWebRequestBatchTimeout)
 			if len(reqBuffer) > 0 {
 				breq := batchWebRequestT{batchRequest: reqBuffer}
-				userWebRequestWorker.timeOutStat.Count(1)
-				userWebRequestWorker.batchRequestQ <- &breq
+				gateway.addToBatchRequestQ(userWebRequestWorker, "timeout", breq)
 				reqBuffer = nil
 				reqBuffer = make([]*webRequestT, 0)
 			}
