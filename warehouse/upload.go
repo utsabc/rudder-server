@@ -41,6 +41,8 @@ const (
 	GeneratedStagingFileState               = "generated_staging_file"
 	PopulatingHistoricIdentitiesState       = "populating_historic_identities"
 	PopulatingHistoricIdentitiesStateFailed = "populating_historic_identities_failed"
+	FetchingRemoteSchemaFailed              = "fetching_remote_schema_failed"
+	InternalProcessingFailed                = "internal_processing_failed"
 )
 
 // Table Upload status
@@ -241,34 +243,34 @@ func (job *UploadJobT) run() (err error) {
 
 	if len(job.stagingFiles) == 0 {
 		err := fmt.Errorf("No staging files found")
-		job.setUploadError(err, job.upload.Status)
+		job.setUploadError(err, InternalProcessingFailed)
 		return err
 	}
 
 	hasSchemaChanged, err := job.syncRemoteSchema()
 	if err != nil {
-		job.setUploadError(err, job.upload.Status)
+		job.setUploadError(err, FetchingRemoteSchemaFailed)
 		return err
 	}
-
-	schemaHandle := job.schemaHandle
-	if !hasSchemaChanged {
-		schemaHandle.uploadSchema = job.upload.Schema
-	} else {
+	if hasSchemaChanged {
 		pkgLogger.Infof("[WH] Remote schema changed for Warehouse: %s", job.warehouse.Identifier)
 	}
+	schemaHandle := job.schemaHandle
+	schemaHandle.uploadSchema = job.upload.Schema
 
 	whManager := job.whManager
 	err = whManager.Setup(job.warehouse, job)
 	if err != nil {
-		job.setUploadError(err, job.upload.Status)
+		job.setUploadError(err, InternalProcessingFailed)
 		return err
 	}
 	defer whManager.Cleanup()
-
 	var newStatus string
-
-	nextUploadState := getNextUploadState(job.upload.Status)
+	var nextUploadState *uploadStateT
+	// do not set nextUploadState if hasSchemaChanged to make it start from 1st step again
+	if !hasSchemaChanged {
+		nextUploadState = getNextUploadState(job.upload.Status)
+	}
 	if nextUploadState == nil {
 		nextUploadState = stateTransitions[GeneratedUploadSchema]
 	}
@@ -285,7 +287,7 @@ func (job *UploadJobT) run() (err error) {
 
 		case GeneratedUploadSchema:
 			newStatus = nextUploadState.failed
-			err := job.generateUploadSchema(schemaHandle)
+			err = job.generateUploadSchema(schemaHandle)
 			if err != nil {
 				break
 			}
@@ -293,7 +295,7 @@ func (job *UploadJobT) run() (err error) {
 
 		case CreatedTableUploads:
 			newStatus = nextUploadState.failed
-			err := job.initTableUploads()
+			err = job.initTableUploads()
 			if err != nil {
 				break
 			}
@@ -393,7 +395,6 @@ func (job *UploadJobT) run() (err error) {
 			previouslyFailedTables, currentJobSucceededTables := job.getTablesToSkip()
 			skipLoadForTables := append(skipPrevLoadedTableNames, previouslyFailedTables...)
 			skipLoadForTables = append(skipLoadForTables, currentJobSucceededTables...)
-
 			// Export all other tables
 			loadTimeStat := job.timerStat("other_tables_load_time")
 			loadTimeStat.Start()
@@ -402,6 +403,7 @@ func (job *UploadJobT) run() (err error) {
 
 			if len(previouslyFailedTables) > 0 {
 				loadErrors = append(loadErrors, fmt.Errorf("skipping the following tables because they failed previously : %+v", previouslyFailedTables))
+				pkgLogger.Infof("%#v", previouslyFailedTables)
 			}
 
 			if len(loadErrors) > 0 {
@@ -567,8 +569,10 @@ func (job *UploadJobT) updateTableSchema(tName string, tableSchemaDiff warehouse
 		err = job.whManager.CreateTable(tName, tableSchemaDiff.ColumnMap)
 		if err != nil {
 			pkgLogger.Errorf("Error creating table %s on namespace: %s, error: %v", tName, job.warehouse.Namespace, err)
+			return err
 		}
-		return err
+		job.counterStat("tables_added").Increment()
+		return nil
 	}
 
 	for columnName, columnType := range tableSchemaDiff.ColumnMap {
@@ -577,6 +581,7 @@ func (job *UploadJobT) updateTableSchema(tName string, tableSchemaDiff warehouse
 			pkgLogger.Errorf("Column %s already exists on %s.%s \nResponse: %v", columnName, job.warehouse.Namespace, tName, err)
 			break
 		}
+		job.counterStat("columns_added").Increment()
 	}
 
 	if err != nil {

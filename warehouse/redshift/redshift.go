@@ -514,6 +514,11 @@ func connect(cred RedshiftCredentialsT) (*sql.DB, error) {
 	if db, err = sql.Open("postgres", url); err != nil {
 		return nil, fmt.Errorf("redshift connect error : (%v)", err)
 	}
+	stmt := `SET query_group to 'RudderStack'`
+	_, err = db.Exec(stmt)
+	if err != nil {
+		return nil, fmt.Errorf("redshift set query_group error : %v", err)
+	}
 	return db, nil
 }
 
@@ -562,7 +567,11 @@ func (rs *HandleT) connectToWarehouse() (*sql.DB, error) {
 
 func (rs *HandleT) CreateSchema() (err error) {
 	var schemaExists bool
-	if schemaExists, err = rs.schemaExists(rs.Namespace); err != nil && !schemaExists {
+	schemaExists, err = rs.schemaExists(rs.Namespace)
+	if err != nil {
+		return err
+	}
+	if !schemaExists {
 		err = rs.createSchema()
 	}
 	return err
