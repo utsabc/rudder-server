@@ -55,8 +55,7 @@ func NewProducer(destinationConfig interface{}) (*pubsubClient, error) {
 		topic.PublishSettings.DelayThreshold = 0
 		topicMap[s["to"]] = topic
 	}
-	var pbsClient *pubsubClient
-	pbsClient = &pubsubClient{client, topicMap}
+	var pbsClient *pubsubClient = &pubsubClient{client, topicMap}
 	return pbsClient, nil
 }
 func Produce(jsonData json.RawMessage, producer interface{}, destConfig interface{}) (statusCode int, respStatus string, responseMessage string) {
@@ -99,8 +98,7 @@ func Produce(jsonData json.RawMessage, producer interface{}, destConfig interfac
 			responseMessage = "[GooglePubSub] error :: empty topic id string"
 			return 400, respStatus, responseMessage
 		}
-		var topic *pubsub.Topic
-		topic = pbs.TopicMap[topicIdString]
+		var topic *pubsub.Topic = pbs.TopicMap[topicIdString]
 		if topic == nil {
 			statusCode = 400
 			responseMessage = "[GooglePubSub] error :: Topic not found in project"

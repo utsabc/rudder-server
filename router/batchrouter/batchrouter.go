@@ -412,7 +412,7 @@ func (brt *HandleT) setJobStatus(batchJobs BatchJobsT, isWarehouse bool, err err
 			// change job state to abort state after warehouse service is continuously failing more than warehouseServiceMaxRetryTimeinHr time
 			if jobState == jobsdb.Failed.State && isWarehouse && postToWarehouseErr {
 				warehouseServiceFailedTimeLock.RLock()
-				if time.Now().Sub(warehouseServiceFailedTime) > warehouseServiceMaxRetryTimeinHr {
+				if time.Since(warehouseServiceFailedTime) > warehouseServiceMaxRetryTimeinHr {
 					jobState = jobsdb.Aborted.State
 				}
 				warehouseServiceFailedTimeLock.RUnlock()
@@ -520,7 +520,7 @@ func (brt *HandleT) recordUploadStats(destination DestinationT, output StorageUp
 			"destType":    brt.destType,
 			"destination": destinationTag,
 		})
-		eventDeliveryTimeStat.SendTiming(time.Now().Sub(receivedTime))
+		eventDeliveryTimeStat.SendTiming(time.Since(receivedTime))
 	}
 }
 
@@ -863,7 +863,7 @@ func (brt *HandleT) collectMetrics() {
 	if diagnostics.EnableBatchRouterMetric {
 		for {
 			select {
-			case _ = <-brt.diagnosisTicker.C:
+			case <-brt.diagnosisTicker.C:
 				brt.batchRequestsMetricLock.RLock()
 				var diagnosisProperties map[string]interface{}
 				success := 0

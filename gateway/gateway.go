@@ -157,8 +157,7 @@ func (gateway *HandleT) initUserWebRequestWorkers() {
 	gateway.userWebRequestWorkers = make([]*userWebRequestWorkerT, maxUserWebRequestWorkerProcess)
 	for i := 0; i < maxUserWebRequestWorkerProcess; i++ {
 		gateway.logger.Debug("User Web Request Worker Started", i)
-		var userWebRequestWorker *userWebRequestWorkerT
-		userWebRequestWorker = &userWebRequestWorkerT{
+		var userWebRequestWorker = &userWebRequestWorkerT{
 			webRequestQ:    make(chan *webRequestT, maxUserWebRequestBatchSize),
 			batchRequestQ:  make(chan *batchWebRequestT),
 			reponseQ:       make(chan map[uuid.UUID]string),

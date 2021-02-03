@@ -59,6 +59,10 @@ func ArchiveOldRecords(tableName, tsColumn string, archivalTimeInDays int, dbHan
 	}
 
 	tmpDirPath, err := misc.CreateTMPDIR()
+	if err != nil {
+		pkgLogger.Errorf("[Archiver]: Failed to create tmp DIR")
+		panic(err)
+	}
 	backupPathDirName := "/rudder-archives/"
 	pathPrefix := strcase.ToKebab(tableName)
 
